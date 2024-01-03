@@ -88,15 +88,18 @@ RUN pip install --no-cache-dir git+https://github.com/Xilinx/brevitas.git@67be9b
 # Install prerequisites for pyverilator
 RUN pip install --no-cache-dir pyverilator
 
-# Install LogicNets library - SKIP this step and install during entry-point
-#RUN git clone git@github.com:Xilinx/logicnets.git && \
-#    cd logicnets && \
-#    pip install --upgrade .[example-all]
+# Install LogicNets library - SKIP this step and install during entry-point NOT SKIPPING SINCE ENTRY-SCRIPT CAUSING ISSUES
+USER root
+RUN git clone https://github.com/Xilinx/logicnets.git && \
+    cd logicnets && \
+    pip install --upgrade .[example-all]
+
+USER $UNAME
 
 # Add entry point script to install LogicNets and setup vivado.
 ENV LOCAL_PATH=$HOME/.local/bin
 RUN mkdir -p $LOCAL_PATH
 COPY docker/entry-point.sh $LOCAL_PATH
 ENV PATH=$LOCAL_PATH:$PATH
-ENTRYPOINT ["entry-point.sh"]
-CMD ["bash"]
+#ENTRYPOINT ["/bin/bash", "/home/peter/.local/bin/entry-point.sh"]
+CMD ["/bin/bash"]

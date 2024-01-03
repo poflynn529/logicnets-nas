@@ -16,22 +16,24 @@
 
 set -e
 
-DOCKER_GID=$(id -g)
-DOCKER_GNAME=$(id -gn)
-DOCKER_UNAME=$(id -un)
-DOCKER_UID=$(id -u)
+DOCKER_GID=1001
+DOCKER_GNAME="group-0"
+DOCKER_UNAME="peter"
+DOCKER_UID=1001
 DOCKER_TAG=$DOCKER_UNAME/logicnets:$(date +%Y%m%d%H%M)
 LOGICNETS_PATH=$(readlink -f $(dirname ${0})/../)
 LOGICNETS_MOUNT_POINT=/workspace/logicnets
 
-docker build \
-    -t ${DOCKER_TAG} \
-    -f docker/Dockerfile.cpu \
+echo "Starting Container Build..."
+
+docker build -f docker/Dockerfile.cpu -t ${DOCKER_TAG} \
     --build-arg GID=$DOCKER_GID \
     --build-arg GNAME=$DOCKER_GNAME \
     --build-arg UNAME=$DOCKER_UNAME \
     --build-arg UID=$DOCKER_UID \
     .
+
+echo "Build Complete. Running..."
 
 DOCKER_EXEC="docker run --rm --shm-size 32G -i -t --init "
 
