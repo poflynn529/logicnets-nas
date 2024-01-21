@@ -62,3 +62,8 @@ MANIFEST
 
 # Per-project virtualenvs
 .venv*/
+
+# Specific scripts
+logicnets-nas-build.sh
+logicnets-nas-create-cont.sh
+logicnets-nas-start.sh
