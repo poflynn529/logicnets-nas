@@ -14,7 +14,8 @@ hyper_params = {
 
 def loss_function(architecture, accuracy):
 
-    # LUT cost of NEQ based on LogicNets paper.
+    # LUT cost of NEQ based on LogicNets paper where X and Y corresponding to the bitwidth of the input
+    # and output respectively.
     def lut_cost(X, Y): 
         return (Y / 3) * (np.pow(2, (X - 4)) - np.pow(-1, X))
 
