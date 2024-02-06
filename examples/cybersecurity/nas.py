@@ -1,6 +1,5 @@
 # NAS via SDG
 
-import numpy as np
 import csv
 import random
 
@@ -9,13 +8,13 @@ from architecture import Architecture, nid_m_arch
 # All run data will be stored here.
 log_file_path = "nas_runs/v1.csv"
 
-# NAS Hyper-Parameters
+# Hyper-Parameters
 hyper_params = {
     # NAS
     "utilisation_coeff" : 0.5,   # Weight of the loss function towards resource utilisation.
     "accuracy_coeff"    : 0.5,   # Weight of the loss function towards accuracy.
     "unity_utilisation" : 16000, # LUT utilisation considered "nominal" to normalise loss function input.
-    "max_iterations"    : 1000,  # Maximum amount of architecture explorations per execution of this script
+    "max_iterations"    : 100,  # Maximum amount of architecture explorations per execution of this script
 
     # Training
     "weight_decay": 0.0,
@@ -36,7 +35,14 @@ def gradient(a1, a2):
     # Direction indicates which way the parameter moved to get the corresponding loss function shift.
 
     for i in range(len(a1.hidden_layers)):
-        grad.append( abs(a1.hidden_layers[i] - a2.hidden_layers[i]) / (a1.loss - a2.loss) ) # Rate of change of the last iteration with respect to the loss function.
+        
+        # Gradient
+        if a1.loss != a2.loss:
+            grad.append( abs(a1.hidden_layers[i] - a2.hidden_layers[i]) / (a1.loss - a2.loss) ) # Rate of change of the last iteration with respect to the loss function.
+        else:
+            grad.append(0.0)
+
+        # Direction
         if a1.hidden_layers[i] - a2.hidden_layers[i] > 0:
             direction.append(1)
         elif a1.hidden_layers[i] - a2.hidden_layers[i] < 0:
@@ -50,7 +56,7 @@ def gradient(a1, a2):
 def append_to_csv(file_name, data):
     with open(file_name, 'a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerows(data)
+        writer.writerow(data)
 
 # Randomly increment or decrement an array.
 def random_dx(arr, type="int", dx=1, allow_no_change=True):
@@ -118,8 +124,9 @@ if __name__ == "__main__":
 
         arch = Architecture(hyper_params, nid_m_arch) # Create an instance of the NID-M architecture outlined in the LogicNets paper.
         arch.evaluate()
-        data = [arch.accuracy, arch.utilisation, arch.loss, arch.hidden_layers, arch.hash]
-        append_to_csv(log_file_path, data)
+        print(arch.get_csv_data())
+        append_to_csv(log_file_path, arch.get_csv_data())
+        prev_architectures.add(arch.hash)
         
         a1 = arch
         row_count += 1
@@ -129,8 +136,8 @@ if __name__ == "__main__":
         new_layers = random_dx(a1.hidden_layers, allow_no_change=False)
         arch = Architecture(hyper_params, new_layers)
         arch.evaluate()
-        data = [arch.accuracy, arch.utilisation, arch.loss, arch.hidden_layers, arch.hash]
-        append_to_csv(log_file_path, data)
+        append_to_csv(log_file_path, arch.get_csv_data())
+        prev_architectures.add(arch.hash)
 
         a2 = a1
         a1 = arch
@@ -146,17 +153,24 @@ if __name__ == "__main__":
             new_layers = a1.hidden_layers.copy()
             
             for i, layer in enumerate(new_layers):
-
-                # This recent change caused the loss function to increase, therefore we go in the opposite direction.
-                if grad_layers[i] > 0:
-                    new_layers[i] -= direction[i]
-                    
-                # This recent change caused the loss function to decrease, therefore we continue in that direction.
-                elif grad_layers[i] < 0:
-                    new_layers[i] += direction[i]
+                hash = a1.hash
+                while hash in prev_architectures:
+                    # This recent change caused the loss function to increase, therefore we go in the opposite direction.
+                    if grad_layers[i] > 0:
+                        new_layers[i] -= direction[i]
+                        
+                    # This recent change caused the loss function to decrease, therefore we continue in that direction.
+                    elif grad_layers[i] < 0:
+                        new_layers[i] += direction[i]
             
             # Create new architecture with the parameters and evaluate.
-            arch = Architecture(hyper_params)
+            arch = Architecture(hyper_params, new_layers)
+            arch.evaluate()
+            append_to_csv(log_file_path, arch.get_csv_data())
+            prev_architectures.add(arch.hash)
+
+            a2 = a1
+            a1 = arch
 
 
         print("Search completed! Exiting...")

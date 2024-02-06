@@ -241,6 +241,7 @@ def train(model, datasets, train_cfg, options):
         writer.add_scalar('val_accuracy', val_accuracy, (epoch+1)*steps)
         writer.add_scalar('test_accuracy', test_accuracy, (epoch+1)*steps)
         print(f"Epoch: {epoch}/{num_epochs}\tValid Acc (%): {val_accuracy:.2f}\tTest Acc: {test_accuracy:.2f}")
+        return test_accuracy
 
 def test(model, dataset_loader, cuda, thresh=0.75):
     model.eval()
@@ -256,6 +257,43 @@ def test(model, dataset_loader, cuda, thresh=0.75):
         correct += curCorrect
     accuracy = 100*float(correct) / len(dataset_loader.dataset)
     return accuracy
+
+def main(architecture):
+    if not os.path.exists(architecture.hyper_params['log_dir']):
+        os.makedirs(architecture.hyper_params['log_dir'])
+
+    # Set random seeds
+    random.seed(architecture.hyper_params['seed'])
+    np.random.seed(architecture.hyper_params['seed'])
+    torch.manual_seed(architecture.hyper_params['seed'])
+    os.environ['PYTHONHASHSEED'] = str(architecture.hyper_params['seed'])
+    if options["cuda"]:
+        torch.cuda.manual_seed_all(architecture.hyper_params['seed'])
+        torch.backends.cudnn.deterministic = True
+
+    # Fetch the datasets
+    dataset = {}
+    dataset['train'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="train")
+    dataset['valid'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="test") # This dataset is so small, we'll just use the test set as the validation set, otherwise we may have too few trainings examples to converge.
+    dataset['test'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="test")
+
+    # Instantiate model
+    x, y = dataset['train'][0]
+
+    model_cfg = {
+        "input_length": len(x),
+        "output_length": 1,
+        "hidden_layers": architecture.hidden_layers,
+        "input_bitwidth": architecture.input_bitwidth,
+        "hidden_bitwidth": architecture.hidden_bitwidth,
+        "output_bitwidth": architecture.output_bitwidth,
+        "input_fanin": architecture.input_fanin,
+        "hidden_fanin": architecture.hidden_fanin,
+        "output_fanin": architecture.output_fanin,
+    }
+
+    model = UnswNb15NeqModel(model_cfg)
+    return train(model, dataset, train_cfg, options_cfg) # Returns accuracy.
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="LogicNets Network Intrusion Detection Example")
