@@ -19,10 +19,13 @@ hyper_params = {
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 100,
+    "epochs": 10,
     "learning_rate": 1e-1,
     "seed": 196,
     "checkpoint": None,
+    "log_dir": "/logs",
+    "dataset_file": "unsw_nb15_binarized.npz",
+    "cuda": None,
 }
 
 # Compute the gradient with the respect to the loss function between two architectures.
@@ -38,7 +41,7 @@ def gradient(a1, a2):
         
         # Gradient
         if a1.loss != a2.loss:
-            grad.append( abs(a1.hidden_layers[i] - a2.hidden_layers[i]) / (a1.loss - a2.loss) ) # Rate of change of the last iteration with respect to the loss function.
+            grad.append( abs(int(a1.hidden_layers[i]) - int(a2.hidden_layers[i])) / (a1.loss - a2.loss) ) # Rate of change of the last iteration with respect to the loss function.
         else:
             grad.append(0.0)
 
@@ -152,9 +155,11 @@ if __name__ == "__main__":
             # Now we adjust each parameter according to the gradient.
             new_layers = a1.hidden_layers.copy()
             
-            for i, layer in enumerate(new_layers):
-                hash = a1.hash
-                while hash in prev_architectures:
+            hash = a1.hash
+            while hash in prev_architectures:
+
+                for i, layer in enumerate(new_layers):
+                    
                     # This recent change caused the loss function to increase, therefore we go in the opposite direction.
                     if grad_layers[i] > 0:
                         new_layers[i] -= direction[i]
@@ -162,6 +167,8 @@ if __name__ == "__main__":
                     # This recent change caused the loss function to decrease, therefore we continue in that direction.
                     elif grad_layers[i] < 0:
                         new_layers[i] += direction[i]
+
+                hash = Architecture.compute_hash(new_layers)
             
             # Create new architecture with the parameters and evaluate.
             arch = Architecture(hyper_params, new_layers)

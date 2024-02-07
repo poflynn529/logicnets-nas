@@ -267,7 +267,7 @@ def main(architecture):
     np.random.seed(architecture.hyper_params['seed'])
     torch.manual_seed(architecture.hyper_params['seed'])
     os.environ['PYTHONHASHSEED'] = str(architecture.hyper_params['seed'])
-    if options["cuda"]:
+    if architecture.hyper_params["cuda"]:
         torch.cuda.manual_seed_all(architecture.hyper_params['seed'])
         torch.backends.cudnn.deterministic = True
 
@@ -290,6 +290,20 @@ def main(architecture):
         "input_fanin": architecture.input_fanin,
         "hidden_fanin": architecture.hidden_fanin,
         "output_fanin": architecture.output_fanin,
+    }
+
+    train_cfg = {
+    "weight_decay": architecture.hyper_params["weight_decay"],
+    "batch_size": architecture.hyper_params["batch_size"],
+    "epochs": architecture.hyper_params["epochs"],
+    "learning_rate": architecture.hyper_params["learning_rate"],
+    "seed": architecture.hyper_params["seed"],
+    }
+
+    options_cfg = {
+    "cuda": architecture.hyper_params["cuda"],
+    "log_dir": architecture.hyper_params["log_dir"],
+    "checkpoint": architecture.hyper_params["checkpoint"],
     }
 
     model = UnswNb15NeqModel(model_cfg)
