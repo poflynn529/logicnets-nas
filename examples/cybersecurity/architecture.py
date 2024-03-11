@@ -2,12 +2,13 @@ import numpy as np
 import random
 import hashlib
 import train
+import ast
 
 # Architecture class for holding configurable parameters:
 
 class Architecture:
 
-    def __init__(self, hyper_params, hidden_layers, accuracy = -1, utilisation = -1, loss = -1, hash = -1):
+    def __init__(self, hyper_params, hidden_layers, accuracy = None, utilisation = None, loss = None, hash = None):
         self.hyper_params = hyper_params
         self.hidden_layers = hidden_layers
         self.input_bitwidth = 1
@@ -37,16 +38,25 @@ class Architecture:
 
     # Compute the loss of a particular architecture.
     def compute_loss(self):
-        estimated_utilisation = self.utilisation
-        self.loss = round((estimated_utilisation / self.hyper_params["unity_utilisation"]) * self.hyper_params["utilisation_coeff"] + self.accuracy * self.hyper_params["accuracy_coeff"], 3)
+
+        utilisation_loss = (self.utilisation / self.hyper_params["unity_utilisation"])
+        
+        if self.accuracy > self.hyper_params["target_accuracy"]:
+            accuracy_loss = 0
+            #print(f"[DEBUG] Target Accuracy Acheived, AccLoss: {accuracy_loss}")
+        else:
+            accuracy_loss = (self.hyper_params["target_accuracy"] - self.accuracy)
+            #print(f"[DEBUG] AccLoss: {accuracy_loss}")
+
+        return round(utilisation_loss * self.hyper_params["utilisation_coeff"] + accuracy_loss * self.hyper_params["accuracy_coeff"], 3)
 
     def evaluate(self):
-        self.accuracy = train.main(self)
-        print("Training Complete!")
+        self.accuracy = train.main(self) / 100
+        #print(f"[DEBUG] Final Validation Accuracy: {self.accuracy}")
         self.utilisation = self.compute_utilisation()
-        self.compute_loss()
+        self.loss = self.compute_loss()
         self.hash = Architecture.compute_hash(self.hidden_layers)
-    
+        
     @staticmethod
     def compute_hash(layers):
         hash_object = hashlib.md5()
@@ -54,8 +64,11 @@ class Architecture:
         return hash_object.hexdigest()
 
     def get_csv_data(self):
-        print(f"Writing to CSV:   Accuracy: {self.accuracy}, Utilisation: {self.utilisation}, Loss: {self.loss}, Layers: {self.hidden_layers}")
+        #print(f"[DEBUG] Writing to CSV:   Accuracy: {self.accuracy}, Utilisation: {self.utilisation}, Loss: {self.loss}, Layers: {self.hidden_layers}")
         return [self.accuracy, self.utilisation, self.loss, self.hidden_layers, self.hash]
 
-    
+    @staticmethod
+    def load_from_csv(hyper_params, row, csv_index):
+        return Architecture(hyper_params, hidden_layers=ast.literal_eval(row[csv_index["layers"]]), accuracy=float(row[csv_index["accuracy"]]), utilisation=int(row[csv_index["utilisation"]]), loss=float(row[csv_index["loss"]]), hash=row[csv_index["hash"]])
+
 nid_m_arch = [593, 256, 128, 128]

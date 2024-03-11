@@ -2,6 +2,7 @@
 
 import csv
 import random
+import torch
 
 from architecture import Architecture, nid_m_arch
 
@@ -11,24 +12,35 @@ log_file_path = "nas_runs/v1.csv"
 # Hyper-Parameters
 hyper_params = {
     # NAS
-    "utilisation_coeff" : 0.5,   # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"    : 0.5,   # Weight of the loss function towards accuracy.
-    "unity_utilisation" : 16000, # LUT utilisation considered "nominal" to normalise loss function input.
-    "max_iterations"    : 100,  # Maximum amount of architecture explorations per execution of this script
+    "mode"              : "grad",    # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
+    "utilisation_coeff" : 0.4,       # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"    : 0.6,       # Weight of the loss function towards accuracy.
+    "unity_utilisation" : 16000,     # LUT utilisation considered "nominal" to normalise loss function input.
+    "max_iterations"    : 100,       # Maximum amount of architecture explorations per execution of this script
+    "target_accuracy"   : 0.92,      # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
+    "clear_logs"        : True,      # Clear the log files.
 
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 10,
+    "epochs": 100,
     "learning_rate": 1e-1,
     "seed": 196,
     "checkpoint": None,
-    "log_dir": "/logs",
+    "log_dir": "training-logs",
     "dataset_file": "unsw_nb15_binarized.npz",
-    "cuda": None,
+    "cuda": True,
 }
 
-# Compute the gradient with the respect to the loss function between two architectures.
+# GPU Config
+if torch.cuda.is_available():
+    print("[NAS] CUDA Device Name:", torch.cuda.get_device_name(0))
+    print(f"[NAS] Use CUDA: {hyper_params['cuda']}")
+else:
+
+    print("[NAS] CUDA not available.")
+
+# Compute the numerical gradient of the loss function with respect to the parameter between two architectures.
 def gradient(a1, a2):
 
     grad = []
@@ -41,11 +53,11 @@ def gradient(a1, a2):
         
         # Gradient
         if a1.loss != a2.loss:
-            grad.append( abs(int(a1.hidden_layers[i]) - int(a2.hidden_layers[i])) / (a1.loss - a2.loss) ) # Rate of change of the last iteration with respect to the loss function.
+            grad.append( (a1.loss - a2.loss) / abs(int(a1.hidden_layers[i]) - int(a2.hidden_layers[i])) ) # Rate of change of the last iteration with respect to the loss function.
         else:
             grad.append(0.0)
 
-        # Direction
+        # Direction - This is messy, need to change to some sort of vector / matrix / tuple
         if a1.hidden_layers[i] - a2.hidden_layers[i] > 0:
             direction.append(1)
         elif a1.hidden_layers[i] - a2.hidden_layers[i] < 0:
@@ -87,6 +99,33 @@ def random_dx(arr, type="int", dx=1, allow_no_change=True):
 
     return result
 
+def genetic_search():
+
+    # Read in the CSV data.
+    with open(log_file_path, 'r') as file:
+
+        reader = csv.reader(file)
+        csv_index = list_to_dict(next(reader)) # Generate a dictionary with list index of each csv header.
+
+        for row in reader:
+            row_count += 1
+            prev_architectures.add(row[-1]) # Add the hash to a map to check for it later.
+            # Add to queue
+
+        # Generate initial searches.
+        if row_count <= pop_size - 1:
+            
+            while row_count != pop_size:
+                # Create and evalutate random.
+                pop_size += 1
+
+        for i in max_generations:
+            # Perform evolution, training and logging.
+            continue
+
+def gradient_search():
+    return
+
 # Convert list of strings to dictionary with the value being the index.
 def list_to_dict(lst):
     return {string: index for index, string in enumerate(lst)}
@@ -115,12 +154,12 @@ if __name__ == "__main__":
             prev_architectures.add(row[-1]) # Add the hash to a map to check for it later.
 
         if a2_row != None:
-            a2 = Architecture(hyper_params, a2_row[csv_index["layers"]], a2_row[csv_index["accuracy"]], a2_row[csv_index["utilisation"]], a2_row[csv_index["loss"]], a2_row[csv_index["hash"]])
+            a2 = Architecture.load_from_csv(hyper_params, a2_row, csv_index)
 
         if a1_row != None:
-            a1 = Architecture(hyper_params, a1_row[csv_index["layers"]], a1_row[csv_index["accuracy"]], a1_row[csv_index["utilisation"]], a1_row[csv_index["loss"]], a1_row[csv_index["hash"]])
+            a1 = Architecture.load_from_csv(hyper_params, a1_row, csv_index)
 
-        print(f"Previously evaluated architectures loaded: {row_count}")
+        print(f"[NAS] Previously evaluated architectures loaded: {row_count}")
 
     # We need at least two datapoints to perform the gradient computation:
     if row_count == 0:
@@ -155,20 +194,20 @@ if __name__ == "__main__":
             # Now we adjust each parameter according to the gradient.
             new_layers = a1.hidden_layers.copy()
             
-            hash = a1.hash
-            while hash in prev_architectures:
+            new_hash = a1.hash
+            while new_hash in prev_architectures:
 
-                for i, layer in enumerate(new_layers):
+                for i, layer in enumerate(new_layers): 
                     
                     # This recent change caused the loss function to increase, therefore we go in the opposite direction.
                     if grad_layers[i] > 0:
                         new_layers[i] -= direction[i]
                         
                     # This recent change caused the loss function to decrease, therefore we continue in that direction.
-                    elif grad_layers[i] < 0:
+                    elif grad_layers[i] <= 0:
                         new_layers[i] += direction[i]
 
-                hash = Architecture.compute_hash(new_layers)
+                new_hash = Architecture.compute_hash(new_layers)
             
             # Create new architecture with the parameters and evaluate.
             arch = Architecture(hyper_params, new_layers)

@@ -18,6 +18,7 @@ from functools import reduce
 import random
 
 import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -193,55 +194,63 @@ def train(model, datasets, train_cfg, options):
     # Main training loop
     maxAcc = 0.0
     num_epochs = train_cfg["epochs"]
-    for epoch in range(0, num_epochs):
-        # Train for this epoch
-        model.train()
-        accLoss = 0.0
-        correct = 0
-        for batch_idx, (data, target) in enumerate(train_loader):
-            if options["cuda"]:
-                data, target = data.cuda(), target.cuda()
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target.unsqueeze(1))
-            pred = (torch.sigmoid(output.detach()) > 0.75) * 1
-            curCorrect = pred.eq(target.unsqueeze(1)).long().sum()
-            curAcc = 100.0*curCorrect / len(data)
-            correct += curCorrect
-            accLoss += loss.detach()*len(data)
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
+    #print(f"[LogicNets] Training for {num_epochs}.")
+    with tqdm(total=num_epochs, desc='Training Progress', unit='epoch') as pbar:
+        for epoch in range(0, num_epochs):
+            # Train for this epoch
+            model.train()
+            accLoss = 0.0
+            correct = 0
+            for batch_idx, (data, target) in enumerate(train_loader):
+                if options["cuda"]:
+                    data, target = data.cuda(), target.cuda()
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target.unsqueeze(1))
+                pred = (torch.sigmoid(output.detach()) > 0.75) * 1
+                curCorrect = pred.eq(target.unsqueeze(1)).long().sum()
+                curAcc = 100.0*curCorrect / len(data)
+                correct += curCorrect
+                accLoss += loss.detach()*len(data)
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
 
-            # Log stats to tensorboard
-            #writer.add_scalar('train_loss', loss.detach().cpu().numpy(), epoch*steps + batch_idx)
-            #writer.add_scalar('train_accuracy', curAcc.detach().cpu().numpy(), epoch*steps + batch_idx)
-            #g = optimizer.param_groups[0]
-            #writer.add_scalar('LR', g['lr'], epoch*steps + batch_idx)
+                # Log stats to tensorboard
+                #writer.add_scalar('train_loss', loss.detach().cpu().numpy(), epoch*steps + batch_idx)
+                #writer.add_scalar('train_accuracy', curAcc.detach().cpu().numpy(), epoch*steps + batch_idx)
+                #g = optimizer.param_groups[0]
+                #writer.add_scalar('LR', g['lr'], epoch*steps + batch_idx)
 
-        accLoss /= len(train_loader.dataset)
-        accuracy = 100.0*correct / len(train_loader.dataset)
-        print(f"Epoch: {epoch}/{num_epochs}\tTrain Acc (%): {accuracy.detach().cpu().numpy():.2f}\tTrain Loss: {accLoss.detach().cpu().numpy():.3e}")
-        #for g in optimizer.param_groups:
-        #        print("LR: {:.6f} ".format(g['lr']))
-        #        print("LR: {:.6f} ".format(g['weight_decay']))
-        writer.add_scalar('avg_train_loss', accLoss.detach().cpu().numpy(), (epoch+1)*steps)
-        writer.add_scalar('avg_train_accuracy', accuracy.detach().cpu().numpy(), (epoch+1)*steps)
-        val_accuracy = test(model, val_loader, options["cuda"])
-        test_accuracy = test(model, test_loader, options["cuda"])
-        modelSave = {   'model_dict': model.state_dict(),
-                        'optim_dict': optimizer.state_dict(),
-                        'val_accuracy': val_accuracy,
-                        'test_accuracy': test_accuracy,
-                        'epoch': epoch}
-        torch.save(modelSave, options["log_dir"] + "/checkpoint.pth")
-        if(maxAcc<val_accuracy):
-            torch.save(modelSave, options["log_dir"] + "/best_accuracy.pth")
-            maxAcc = val_accuracy
-        writer.add_scalar('val_accuracy', val_accuracy, (epoch+1)*steps)
-        writer.add_scalar('test_accuracy', test_accuracy, (epoch+1)*steps)
-        print(f"Epoch: {epoch}/{num_epochs}\tValid Acc (%): {val_accuracy:.2f}\tTest Acc: {test_accuracy:.2f}")
-        return test_accuracy
+            accLoss /= len(train_loader.dataset)
+            accuracy = 100.0*correct / len(train_loader.dataset)
+            #print(f"[LogicNets] Epoch: {epoch}/{num_epochs}\tTrain Acc (%): {accuracy.detach().cpu().numpy():.2f}\tTrain Loss: {accLoss.detach().cpu().numpy():.3e}")
+            #for g in optimizer.param_groups:
+            #        print("LR: {:.6f} ".format(g['lr']))
+            #        print("LR: {:.6f} ".format(g['weight_decay']))
+            writer.add_scalar('avg_train_loss', accLoss.detach().cpu().numpy(), (epoch+1)*steps)
+            writer.add_scalar('avg_train_accuracy', accuracy.detach().cpu().numpy(), (epoch+1)*steps)
+            val_accuracy = test(model, val_loader, options["cuda"])
+            test_accuracy = test(model, test_loader, options["cuda"])
+            modelSave = {   'model_dict': model.state_dict(),
+                            'optim_dict': optimizer.state_dict(),
+                            'val_accuracy': val_accuracy,
+                            'test_accuracy': test_accuracy,
+                            'epoch': epoch}
+            torch.save(modelSave, options["log_dir"] + "/checkpoint.pth")
+            if(maxAcc<val_accuracy):
+                torch.save(modelSave, options["log_dir"] + "/best_accuracy.pth")
+                maxAcc = val_accuracy
+            writer.add_scalar('val_accuracy', val_accuracy, (epoch+1)*steps)
+            writer.add_scalar('test_accuracy', test_accuracy, (epoch+1)*steps)
+            #print(f"Epoch: {epoch}/{num_epochs}\tValid Acc (%): {val_accuracy:.2f}\tTest Acc: {test_accuracy:.2f}")
+
+            # Update progress bar with custom postfix information for each epoch
+            pbar.set_postfix(loss=f'{accLoss.detach().cpu().numpy():.3e}', val_acc=f'{val_accuracy:.3f}')
+            # Update progress bar to next epoch
+            pbar.update(1)
+
+    return val_accuracy
 
 def test(model, dataset_loader, cuda, thresh=0.75):
     model.eval()
@@ -260,6 +269,7 @@ def test(model, dataset_loader, cuda, thresh=0.75):
 
 def main(architecture):
     if not os.path.exists(architecture.hyper_params['log_dir']):
+        print("[LogicNets] Creating log directory...")
         os.makedirs(architecture.hyper_params['log_dir'])
 
     # Set random seeds

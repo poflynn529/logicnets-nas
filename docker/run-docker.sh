@@ -26,7 +26,7 @@ LOGICNETS_MOUNT_POINT=/workspace/logicnets
 
 echo "Starting Container Build..."
 
-docker build -f docker/Dockerfile.cpu -t ${DOCKER_TAG} \
+docker build --no-cache -f docker/Dockerfile.cpu -t ${DOCKER_TAG} \
     --build-arg GID=$DOCKER_GID \
     --build-arg GNAME=$DOCKER_GNAME \
     --build-arg UNAME=$DOCKER_UNAME \
