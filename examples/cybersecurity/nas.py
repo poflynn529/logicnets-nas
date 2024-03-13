@@ -2,6 +2,9 @@
 
 import csv
 import random
+import pickle
+import os
+
 import torch
 import numpy as np
 from deap import base, creator, tools, algorithms
@@ -10,15 +13,23 @@ from architecture import Architecture, nid_m_arch
 
 # Hyper-Parameters
 hyper_params = {
-    # NAS
-    "mode"              : "evo",             # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
-    "utilisation_coeff" : 0.4,               # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"    : 0.6,               # Weight of the loss function towards accuracy.
-    "unity_utilisation" : 16000,             # LUT utilisation considered "nominal" to normalise loss function input.
-    "max_iterations"    : 100,               # Maximum amount of architecture explorations per execution of this script
-    "target_accuracy"   : 0.92,              # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
-    "clear_logs"        : True,              # Clear the log files.
-    "log_file_path"     : "nas_runs/v2.csv", # NAS Log File Path
+    # NAS General
+    "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
+    "utilisation_coeff"   : 0.4,                   # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"      : 0.6,                   # Weight of the loss function towards accuracy.
+    "unity_utilisation"   : 16000,                 # LUT utilisation considered "nominal" to normalise loss function input.
+    "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
+
+    # Gradient NAS Specific
+    "grad_clear_logs"     : False,                 # Clear the log files.
+    "grad_log_file_path"  : "nas_runs/grad_0.csv", # NAS Log File Path
+    "grad_max_iterations" : 100,                   # Maximum amount of architecture explorations per execution of this script
+
+    # Evolutionary NAS Specific
+    "pop_size"            : 4,
+    "max_generations"     : 40,
+    "evo_log_file_path"   : "nas_runs/evo_0.txt",
+    "evo_pickle_path"     : "nas_pickle/evo_0.pkl",
 
     # Training
     "weight_decay": 0.0,
@@ -197,6 +208,59 @@ def gradient_search():
         print(f"ERROR: Invalid row count: {row_count}, Exiting...")
 
 def genetic_search():
+
+    # Allow checkpointing using pickle so that we can stop/start the algorithm.
+    def save_checkpoint(population, generation, filename=hyper_params["evo_pickle_path"]):
+        with open(filename, "wb") as cp_file:
+            pickle.dump({
+                "population": population,
+                "generation": generation,
+                # Include other relevant data here
+            }, cp_file)
+
+    def load_checkpoint(filename=hyper_params["evo_pickle_path"]):
+        with open(filename, "rb") as cp_file:
+            checkpoint_data = pickle.load(cp_file)
+        return checkpoint_data
+    
+    def save_log(log, hof, filename=hyper_params["evo_log_file_path"]):
+        with open(filename, 'a', newline='\n') as file:
+            file.write(log)
+            file.write(hof)
+    
+    def evaluate(individual):
+        # Convert the individual back to an architecture.
+        # Train it, evaluate it, and return the loss metric as fitness.
+        arch = Architecture(hyper_params, individual)
+        arch.evaluate()
+        
+        # Loss must be returned as a tuple for the DEAP algorithm to work.
+        return (arch.loss,)
+    
+    def ga_loop(toolbox, stats, hof, ngen=100, cp_filename=hyper_params["evo_pickle_path"]):
+
+        # Attempt to load from checkpoint
+        if os.path.isfile(cp_filename):
+            data = load_checkpoint(cp_filename)
+            population = data["population"]
+            start_gen = data["generation"] + 1  # Continue from the next generation
+            print(f"Resuming from generation {start_gen}")
+        else:
+            # Start a new evolutionary process
+            population = toolbox.population(n=hyper_params["pop_size"])
+            start_gen = 0
+
+        for gen in range(start_gen, ngen):
+            # The for loop now controls the generation count, so ngen can be set to 1.
+            population, log = algorithms.eaSimple(population, toolbox, cxpb=0.5, mutpb=0.2, ngen=1, stats=stats, halloffame=hof, verbose=True)
+
+            # Save a checkpoint for each generation.
+            save_checkpoint(population, gen, cp_filename)
+            save_log(log, tools.HallOfFame(3))
+
+            print(f"Checkpoint & log saved for generation {gen}")
+
+
     # Define the fitness criterion - weight is negetive since we want to minimise the loss function.
     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
     creator.create("Individual", list, fitness=creator.FitnessMin)
@@ -206,26 +270,16 @@ def genetic_search():
     # Attribute generator: define ranges for each gene
     toolbox.register("attr_int", random.randint, 0, 700)  # The "attr_int" alias now calls random.randint and passes (0, 700) as input arguments.
 
-    # This line creates an individual and uses the "attr_int" function to add 10 genes.
-    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, n=10) 
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=20) # Create a random population of size 50.
-
-    def evaluate(individual):
-        # Convert the individual back to an architecture.
-        # Train it, evaluate it, and return the loss metric as fitness.
-        arch = Architecture(hyper_params, individual)
-        arch.evaluate()
-        
-        return (arch.loss)
+    # This line creates an individual and uses the "attr_int" function to add 4 genes.
+    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, n=4) 
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=hyper_params["pop_size"]) # Create a random population of size 4.
     
     toolbox.register("evaluate", evaluate)
     toolbox.register("mate", tools.cxTwoPoint)  # Crossover
     toolbox.register("mutate", tools.mutUniformInt, low=0, up=500, indpb=0.2)  # Mutation
-    toolbox.register("select", tools.selTournament, tournsize=3)
+    toolbox.register("select", tools.selTournament, tournsize=2)
 
     ### Main Evolutionary Code ###
-
-    pop = toolbox.population(n=20)  # Initialize population
     hof = tools.HallOfFame(3)  # Hall of Fame to store the best individual
 
     stats = tools.Statistics(lambda ind: ind.fitness.values)
@@ -233,34 +287,8 @@ def genetic_search():
     stats.register("min", np.min)
     stats.register("max", np.max)
 
-    pop, log = algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=40, stats=stats, halloffame=hof, verbose=True)
+    ga_loop(toolbox, stats, hof, ngen=hyper_params["max_generations"])
 
-    print(f"\n\n[pop]: {pop}\n\n")
-    print(f"[log]: {log}\n\n")
-    print(f"[hof]: {hof}\n\n")
-
-
-    # # Read in the CSV data.
-    # with open(log_file_path, 'r') as file:
-
-    #     reader = csv.reader(file)
-    #     csv_index = list_to_dict(next(reader)) # Generate a dictionary with list index of each csv header.
-
-    #     for row in reader:
-    #         row_count += 1
-    #         prev_architectures.add(row[-1]) # Add the hash to a map to check for it later.
-    #         # Add to queue
-
-    #     # Generate initial searches.
-    #     if row_count <= pop_size - 1:
-            
-    #         while row_count != pop_size:
-    #             # Create and evalutate random.
-    #             pop_size += 1
-
-    #     for i in max_generations:
-    #         # Perform evolution, training and logging.
-    #         continue
 
 # Main function
 if __name__ == "__main__":
