@@ -15,9 +15,9 @@ from architecture import Architecture, nid_m_arch
 hyper_params = {
     # NAS General
     "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
-    "utilisation_coeff"   : 0.4,                   # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"      : 0.6,                   # Weight of the loss function towards accuracy.
-    "unity_utilisation"   : 16000,                 # LUT utilisation considered "nominal" to normalise loss function input.
+    "utilisation_coeff"   : 0.2,                   # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"      : 0.8,                   # Weight of the loss function towards accuracy.
+    "unity_utilisation"   : 1105,                 # LUT utilisation considered "nominal" to normalise loss function input.
     "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
 
     # Gradient NAS Specific
@@ -26,17 +26,24 @@ hyper_params = {
     "grad_max_iterations" : 100,                   # Maximum amount of architecture explorations per execution of this script
 
     # Evolutionary NAS Specific
-    "pop_size"            : 4,
+    "pop_size"            : 10,
     "max_generations"     : 40,
+    "crossover_prob"      : 0.5,
+    "mutation_prob"       : 0.4,
+    "tournsize"           : 2,
+    "max_layer_size"      : 600,
+    "min_layer_size"      : 5,
+    "max_bitwidth"        : 3,
+    "min_bitwidth"        : 1,   
     "evo_log_file_path"   : "nas_runs/evo_0.txt",
     "evo_pickle_path"     : "nas_pickle/evo_0.pkl",
 
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 100,
-    "learning_rate": 1e-1,
-    "seed": 196,
+    "epochs": 1,
+    "learning_rate": 2e-1,
+    "seed": None,
     "checkpoint": None,
     "log_dir": "training-logs",
     "dataset_file": "unsw_nb15_binarized.npz",
@@ -45,6 +52,7 @@ hyper_params = {
 
 # GPU Config
 print(f"[NAS] Use CUDA Parameter: {hyper_params['cuda']}")
+
 
 if torch.cuda.is_available():
     print("[NAS] CUDA Device Name:", torch.cuda.get_device_name(0))
@@ -223,10 +231,19 @@ def genetic_search():
             checkpoint_data = pickle.load(cp_file)
         return checkpoint_data
     
-    def save_log(log, hof, filename=hyper_params["evo_log_file_path"]):
+    def save_log(gen, pop, log, filename=hyper_params["evo_log_file_path"]):
         with open(filename, 'a', newline='\n') as file:
-            file.write(log)
-            file.write(hof)
+            file.write(f"\n###### Generation {gen} ######\n\n")
+            for i, individual in enumerate(pop):
+                file.write(f"INDV {i}:\t{str(individual)}\n")
+            file.write("\nLog:\n\n")
+            file.write(str(log))
+            file.write("\n")
+
+    def save_hof(hof, filename=hyper_params["evo_log_file_path"]):
+        with open(filename, 'a', newline='\n') as file:
+            file.write(f"\n###### Hall of Fame ######\n\n")
+            file.write(f"{hof}\n\n")
     
     def evaluate(individual):
         # Convert the individual back to an architecture.
@@ -237,6 +254,51 @@ def genetic_search():
         # Loss must be returned as a tuple for the DEAP algorithm to work.
         return (arch.loss,)
     
+    # Returns a DEAP Individual object that contains the parameters. 
+    def create_random_individual(num_layers):
+
+        individual=[random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])]
+
+        # We want our layer size as a descending list:
+        for i in range(num_layers - 1):
+            individual.append(random.randint(hyper_params["min_layer_size"], individual[i]))
+
+        #print(f"[DEBUG] create_random_individual() called. Returning: {individual}")
+
+        return creator.Individual(individual)
+    
+    # Mutate individual while maintaining descending layer size.
+    def mutate_layer_size(individual, indpb):
+        
+        if random.random() <= indpb > 0.3:
+            individual[0] = random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])
+                                           
+        for i in range(len(individual) - 1):
+            if random.random() <= indpb:
+                individual[i + 1] = random.randint(hyper_params["min_layer_size"], individual[i])
+
+        return (individual)
+    
+    # Cross individuals while maintaining descending layer size.
+    def crossover_layer_size(indv1, indv2):
+
+        # Perform cross at a randomly chosen point.
+        cross_position = random.randint(0, len(indv1) - 1)
+        p1 = indv1[cross_position]
+        p2 = indv2[cross_position]
+        indv1[cross_position] = p2
+        indv2[cross_position] = p1
+
+        # Check for descending constraint violation
+        for indv in [indv1, indv2]:
+            for i in range(1, len(indv)):
+                if indv[i] > indv[i - 1]:
+                    indv[i] = random.randint(hyper_params["min_layer_size"], indv[i - 1])
+
+        return (indv1, indv2)
+
+
+    # Main evolutionary function
     def ga_loop(toolbox, stats, hof, ngen=100, cp_filename=hyper_params["evo_pickle_path"]):
 
         # Attempt to load from checkpoint
@@ -252,14 +314,16 @@ def genetic_search():
 
         for gen in range(start_gen, ngen):
             # The for loop now controls the generation count, so ngen can be set to 1.
-            population, log = algorithms.eaSimple(population, toolbox, cxpb=0.5, mutpb=0.2, ngen=1, stats=stats, halloffame=hof, verbose=True)
+            population, log = algorithms.eaSimple(population, toolbox, cxpb=hyper_params["crossover_prob"], mutpb=hyper_params["mutation_prob"], ngen=1, stats=stats, halloffame=hof, verbose=True)
 
             # Save a checkpoint for each generation.
             save_checkpoint(population, gen, cp_filename)
-            save_log(log, tools.HallOfFame(3))
+            save_log(gen, population, log)
 
             print(f"Checkpoint & log saved for generation {gen}")
-
+        
+        print ("[NAS] Evolutionary search complete! Writing 'Hall of Fame' to log...")
+        save_hof(hof)
 
     # Define the fitness criterion - weight is negetive since we want to minimise the loss function.
     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
@@ -267,17 +331,14 @@ def genetic_search():
 
     toolbox = base.Toolbox()
 
-    # Attribute generator: define ranges for each gene
-    toolbox.register("attr_int", random.randint, 0, 700)  # The "attr_int" alias now calls random.randint and passes (0, 700) as input arguments.
-
     # This line creates an individual and uses the "attr_int" function to add 4 genes.
-    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, n=4) 
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=hyper_params["pop_size"]) # Create a random population of size 4.
+    toolbox.register("individual", create_random_individual, num_layers=4) 
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=hyper_params["pop_size"]) # Create a random population
     
     toolbox.register("evaluate", evaluate)
-    toolbox.register("mate", tools.cxTwoPoint)  # Crossover
-    toolbox.register("mutate", tools.mutUniformInt, low=0, up=500, indpb=0.2)  # Mutation
-    toolbox.register("select", tools.selTournament, tournsize=2)
+    toolbox.register("mate", crossover_layer_size)  # Crossover
+    toolbox.register("mutate", mutate_layer_size, indpb=0.3)  # Mutation
+    toolbox.register("select", tools.selTournament, tournsize=hyper_params["tournsize"])
 
     ### Main Evolutionary Code ###
     hof = tools.HallOfFame(3)  # Hall of Fame to store the best individual
@@ -292,6 +353,8 @@ def genetic_search():
 
 # Main function
 if __name__ == "__main__":
+
+    print()
 
     mode = hyper_params["mode"]
 

@@ -273,13 +273,14 @@ def main(architecture):
         os.makedirs(architecture.hyper_params['log_dir'])
 
     # Set random seeds
-    random.seed(architecture.hyper_params['seed'])
-    np.random.seed(architecture.hyper_params['seed'])
-    torch.manual_seed(architecture.hyper_params['seed'])
-    os.environ['PYTHONHASHSEED'] = str(architecture.hyper_params['seed'])
-    if architecture.hyper_params["cuda"]:
-        torch.cuda.manual_seed_all(architecture.hyper_params['seed'])
-        torch.backends.cudnn.deterministic = True
+    if architecture.hyper_params['seed'] != None:
+        random.seed(architecture.hyper_params['seed'])
+        np.random.seed(architecture.hyper_params['seed'])
+        torch.manual_seed(architecture.hyper_params['seed'])
+        os.environ['PYTHONHASHSEED'] = str(architecture.hyper_params['seed'])
+        if architecture.hyper_params["cuda"]:
+            torch.cuda.manual_seed_all(architecture.hyper_params['seed'])
+            torch.backends.cudnn.deterministic = True
 
     # Fetch the datasets
     dataset = {}
