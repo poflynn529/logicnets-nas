@@ -27,7 +27,7 @@ hyper_params = {
 
     # Evolutionary NAS Specific
     "pop_size"            : 10,
-    "max_generations"     : 40,
+    "max_generations"     : 80,
     "crossover_prob"      : 0.5,
     "mutation_prob"       : 0.4,
     "tournsize"           : 2,
@@ -41,8 +41,8 @@ hyper_params = {
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 1,
-    "learning_rate": 2e-1,
+    "epochs": 25,
+    "learning_rate": 1e-1,
     "seed": None,
     "checkpoint": None,
     "log_dir": "training-logs",
@@ -277,7 +277,7 @@ def genetic_search():
             if random.random() <= indpb:
                 individual[i + 1] = random.randint(hyper_params["min_layer_size"], individual[i])
 
-        return (individual)
+        return (individual,)
     
     # Cross individuals while maintaining descending layer size.
     def crossover_layer_size(indv1, indv2):

@@ -4,6 +4,45 @@ import hashlib
 import train
 import ast
 
+# Hyper-Parameters
+hyper_params = {
+    # NAS General
+    "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
+    "utilisation_coeff"   : 0.2,                   # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"      : 0.8,                   # Weight of the loss function towards accuracy.
+    "unity_utilisation"   : 1105,                 # LUT utilisation considered "nominal" to normalise loss function input.
+    "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
+
+    # Gradient NAS Specific
+    "grad_clear_logs"     : False,                 # Clear the log files.
+    "grad_log_file_path"  : "nas_runs/grad_0.csv", # NAS Log File Path
+    "grad_max_iterations" : 100,                   # Maximum amount of architecture explorations per execution of this script
+
+    # Evolutionary NAS Specific
+    "pop_size"            : 10,
+    "max_generations"     : 40,
+    "crossover_prob"      : 0.5,
+    "mutation_prob"       : 0.4,
+    "tournsize"           : 2,
+    "max_layer_size"      : 600,
+    "min_layer_size"      : 5,
+    "max_bitwidth"        : 3,
+    "min_bitwidth"        : 1,   
+    "evo_log_file_path"   : "nas_runs/evo_0.txt",
+    "evo_pickle_path"     : "nas_pickle/evo_0.pkl",
+
+    # Training
+    "weight_decay": 0.0,
+    "batch_size": 1024,
+    "epochs": 25,
+    "learning_rate": 1e-1,
+    "seed": None,
+    "checkpoint": None,
+    "log_dir": "training-logs",
+    "dataset_file": "unsw_nb15_binarized.npz",
+    "cuda": True,
+}
+
 # Architecture class for holding configurable parameters:
 
 class Architecture:
@@ -51,7 +90,7 @@ class Architecture:
         return round(utilisation_loss * self.hyper_params["utilisation_coeff"] + accuracy_loss * self.hyper_params["accuracy_coeff"], 3)
 
     def evaluate(self):
-        self.accuracy = train.main(self) / 100
+        self.accuracy = np.mean(train.main(self)) / 100
         #print(f"[DEBUG] Final Validation Accuracy: {self.accuracy}")
         self.utilisation = self.compute_utilisation()
         self.loss = self.compute_loss()
@@ -71,4 +110,14 @@ class Architecture:
     def load_from_csv(hyper_params, row, csv_index):
         return Architecture(hyper_params, hidden_layers=ast.literal_eval(row[csv_index["layers"]]), accuracy=float(row[csv_index["accuracy"]]), utilisation=int(row[csv_index["utilisation"]]), loss=float(row[csv_index["loss"]]), hash=row[csv_index["hash"]])
 
-nid_m_arch = [593, 256, 128, 128]
+nid_m = [593, 256, 128, 128]
+nid_m_comp = [593, 256, 49, 7]
+nid_s = [593, 100]
+nid_s_comp = [49, 7]
+nid_l = [593, 100, 100, 100]
+nid_l_comp = [593, 100, 25, 5]
+
+nid_s_arch = Architecture(hyper_params=hyper_params, hidden_layers=nid_s, )
+nid_m_arch = Architecture(hyper_params=hyper_params, hidden_layers=nid_m, )
+
+

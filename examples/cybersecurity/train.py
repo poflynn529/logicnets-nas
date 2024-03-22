@@ -195,6 +195,7 @@ def train(model, datasets, train_cfg, options):
     maxAcc = 0.0
     num_epochs = train_cfg["epochs"]
     #print(f"[LogicNets] Training for {num_epochs}.")
+    val_accuracy_log = []
     with tqdm(total=num_epochs, desc='Training Progress', unit='epoch') as pbar:
         for epoch in range(0, num_epochs):
             # Train for this epoch
@@ -243,14 +244,15 @@ def train(model, datasets, train_cfg, options):
                 maxAcc = val_accuracy
             writer.add_scalar('val_accuracy', val_accuracy, (epoch+1)*steps)
             writer.add_scalar('test_accuracy', test_accuracy, (epoch+1)*steps)
-            #print(f"Epoch: {epoch}/{num_epochs}\tValid Acc (%): {val_accuracy:.2f}\tTest Acc: {test_accuracy:.2f}")
+            # Save the epoch accuracy
+            val_accuracy_log.append(val_accuracy)
 
             # Update progress bar with custom postfix information for each epoch
             pbar.set_postfix(loss=f'{accLoss.detach().cpu().numpy():.3e}', val_acc=f'{val_accuracy:.3f}')
             # Update progress bar to next epoch
             pbar.update(1)
 
-    return val_accuracy
+    return val_accuracy_log
 
 def test(model, dataset_loader, cuda, thresh=0.75):
     model.eval()
