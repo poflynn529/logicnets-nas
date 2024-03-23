@@ -154,7 +154,7 @@ other_options = {
 
 def train(model, datasets, train_cfg, options):
     # Create data loaders for training and inference:
-    train_loader = DataLoader(datasets["train"], batch_size=train_cfg['batch_size'], shuffle=True)
+    train_loader = DataLoader(datasets["train"], batch_size=train_cfg['batch_size'], shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(datasets["valid"], batch_size=train_cfg['batch_size'], shuffle=False)
     test_loader = DataLoader(datasets["test"], batch_size=train_cfg['batch_size'], shuffle=False)
 
@@ -269,29 +269,35 @@ def test(model, dataset_loader, cuda, thresh=0.75):
     accuracy = 100*float(correct) / len(dataset_loader.dataset)
     return accuracy
 
-def main(architecture):
-    if not os.path.exists(architecture.hyper_params['log_dir']):
+def main(architecture, custom_hyper_params=None):
+
+    if custom_hyper_params != None:
+        model_hyper_params = custom_hyper_params
+    else:
+        model_hyper_params = architecture.hyper_params
+
+    if not os.path.exists(model_hyper_params['log_dir']):
         print("[LogicNets] Creating log directory...")
-        os.makedirs(architecture.hyper_params['log_dir'])
+        os.makedirs(model_hyper_params['log_dir'])
 
     # Set random seeds
-    if architecture.hyper_params['seed'] != None:
-        random.seed(architecture.hyper_params['seed'])
-        np.random.seed(architecture.hyper_params['seed'])
-        torch.manual_seed(architecture.hyper_params['seed'])
-        os.environ['PYTHONHASHSEED'] = str(architecture.hyper_params['seed'])
-        if architecture.hyper_params["cuda"]:
-            torch.cuda.manual_seed_all(architecture.hyper_params['seed'])
+    if model_hyper_params['seed'] != None:
+        random.seed(model_hyper_params['seed'])
+        np.random.seed(model_hyper_params['seed'])
+        torch.manual_seed(model_hyper_params['seed'])
+        os.environ['PYTHONHASHSEED'] = str(model_hyper_params['seed'])
+        if model_hyper_params["cuda"]:
+            torch.cuda.manual_seed_all(model_hyper_params['seed'])
             torch.backends.cudnn.deterministic = True
 
     # Fetch the datasets
     dataset = {}
-    dataset['train'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="train")
-    dataset['valid'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="test") # This dataset is so small, we'll just use the test set as the validation set, otherwise we may have too few trainings examples to converge.
-    dataset['test'] = get_preqnt_dataset(architecture.hyper_params['dataset_file'], split="test")
+    dataset['train'] = get_preqnt_dataset(model_hyper_params['dataset_file'], split="train")
+    dataset['valid'] = get_preqnt_dataset(model_hyper_params['dataset_file'], split="test") # This dataset is so small, we'll just use the test set as the validation set, otherwise we may have too few trainings examples to converge.
+    dataset['test'] = get_preqnt_dataset(model_hyper_params['dataset_file'], split="test")
 
     # Instantiate model
-    x, y = dataset['train'][0]
+    x, y = dataset['train'][0] 
 
     model_cfg = {
         "input_length": len(x),
@@ -306,17 +312,17 @@ def main(architecture):
     }
 
     train_cfg = {
-    "weight_decay": architecture.hyper_params["weight_decay"],
-    "batch_size": architecture.hyper_params["batch_size"],
-    "epochs": architecture.hyper_params["epochs"],
-    "learning_rate": architecture.hyper_params["learning_rate"],
-    "seed": architecture.hyper_params["seed"],
+    "weight_decay": model_hyper_params["weight_decay"],
+    "batch_size": model_hyper_params["batch_size"],
+    "epochs": model_hyper_params["epochs"],
+    "learning_rate": model_hyper_params["learning_rate"],
+    "seed": model_hyper_params["seed"],
     }
 
     options_cfg = {
-    "cuda": architecture.hyper_params["cuda"],
-    "log_dir": architecture.hyper_params["log_dir"],
-    "checkpoint": architecture.hyper_params["checkpoint"],
+    "cuda": model_hyper_params["cuda"],
+    "log_dir": model_hyper_params["log_dir"],
+    "checkpoint": model_hyper_params["checkpoint"],
     }
 
     model = UnswNb15NeqModel(model_cfg)

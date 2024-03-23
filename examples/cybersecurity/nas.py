@@ -15,8 +15,8 @@ from architecture import Architecture, nid_m_arch
 hyper_params = {
     # NAS General
     "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
-    "utilisation_coeff"   : 0.2,                   # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"      : 0.8,                   # Weight of the loss function towards accuracy.
+    "utilisation_coeff"   : 0.04,                   # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"      : 0.96,                   # Weight of the loss function towards accuracy.
     "unity_utilisation"   : 1105,                 # LUT utilisation considered "nominal" to normalise loss function input.
     "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
 
@@ -27,7 +27,7 @@ hyper_params = {
 
     # Evolutionary NAS Specific
     "pop_size"            : 10,
-    "max_generations"     : 80,
+    "max_generations"     : 55,
     "crossover_prob"      : 0.5,
     "mutation_prob"       : 0.4,
     "tournsize"           : 2,
@@ -218,11 +218,12 @@ def gradient_search():
 def genetic_search():
 
     # Allow checkpointing using pickle so that we can stop/start the algorithm.
-    def save_checkpoint(population, generation, filename=hyper_params["evo_pickle_path"]):
+    def save_checkpoint(population, generation, hof, filename=hyper_params["evo_pickle_path"]):
         with open(filename, "wb") as cp_file:
             pickle.dump({
                 "population": population,
                 "generation": generation,
+                "hof": hof
                 # Include other relevant data here
             }, cp_file)
 
@@ -235,7 +236,7 @@ def genetic_search():
         with open(filename, 'a', newline='\n') as file:
             file.write(f"\n###### Generation {gen} ######\n\n")
             for i, individual in enumerate(pop):
-                file.write(f"INDV {i}:\t{str(individual)}\n")
+                file.write(f"INDV {i}:\t{str(individual)}, Fitness: {individual.fitness.values}, \n")
             file.write("\nLog:\n\n")
             file.write(str(log))
             file.write("\n")
@@ -251,6 +252,10 @@ def genetic_search():
         arch = Architecture(hyper_params, individual)
         arch.evaluate()
         
+        # These attributes allow for better logging and debugging.
+        individual.proxy_accuracy = arch.accuracy
+        individual.utilisation = arch.utilisation
+
         # Loss must be returned as a tuple for the DEAP algorithm to work.
         return (arch.loss,)
     
@@ -306,6 +311,7 @@ def genetic_search():
             data = load_checkpoint(cp_filename)
             population = data["population"]
             start_gen = data["generation"] + 1  # Continue from the next generation
+            hof = data["hof"]
             print(f"Resuming from generation {start_gen}")
         else:
             # Start a new evolutionary process
@@ -317,7 +323,7 @@ def genetic_search():
             population, log = algorithms.eaSimple(population, toolbox, cxpb=hyper_params["crossover_prob"], mutpb=hyper_params["mutation_prob"], ngen=1, stats=stats, halloffame=hof, verbose=True)
 
             # Save a checkpoint for each generation.
-            save_checkpoint(population, gen, cp_filename)
+            save_checkpoint(population, gen, hof, cp_filename)
             save_log(gen, population, log)
 
             print(f"Checkpoint & log saved for generation {gen}")
@@ -327,7 +333,7 @@ def genetic_search():
 
     # Define the fitness criterion - weight is negetive since we want to minimise the loss function.
     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMin)
+    creator.create("Individual", list, fitness=creator.FitnessMin, proxy_accuracy=None, utilisation=None) # The proxy_accuracy and utilisation attributes just allow easier logging. They are set in the evaluate() function.
 
     toolbox = base.Toolbox()
 

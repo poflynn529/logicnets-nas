@@ -24,8 +24,16 @@ def reverse_loss(layers, loss):
     return (target_accuracy - accuracy_loss)
 
 
-for arch in [[33, 16, 6, 5], [33, 14, 13, 10], [33, 14, 9, 6]]:
-    print(f"Accuracy of {arch}: {round(reverse_loss(arch, 0.076), 3)}, Utilisation: {compute_utilisation(arch)}")
+# for arch in [[33, 16, 6, 5], [33, 14, 13, 10], [33, 14, 9, 6]]:
+#     print(f"Accuracy of {arch}: {round(reverse_loss(arch, 0.076), 3)}, Utilisation: {compute_utilisation(arch)}")
+
+# nid_s_arch = [593, 100]
+
+# print(f"Accuracy of {arch}: {84}, Utilisation: {compute_utilisation(nid_s_arch)}")
+
+
+for arch in [[97, 39, 14, 7], [97, 58, 29, 6], [97, 95, 30, 7]]:
+    print(f"Accuracy of {arch}: {round(reverse_loss(arch, 0.051), 3)}, Utilisation: {compute_utilisation(arch)}")
 
 nid_s_arch = [593, 100]
 

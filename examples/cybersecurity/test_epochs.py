@@ -1,4 +1,4 @@
-from architecture import Architecture, nid_m_arch, nid_m_comp_arch, nid_s_arch, nid_s_comp_arch, nid_l_arch, nid_l_comp_arch
+from architecture import *
 import train
 import pickle
 
@@ -21,18 +21,24 @@ hyper_params = {
 
 architectures = {
     "nid-m" : nid_m_arch, 
-    "nid-m-comp" : nid_m_comp_arch, 
+    "nid-m-comp" : nid_m_comp, 
     "nid-s" : nid_s_arch, 
-    "nid-s-comp" : nid_s_comp_arch,
+    "nid-s-comp" : nid_s_comp,
     "nid-l" : nid_l_arch,
-    "nid-l-comp" : nid_l_comp_arch
+    "nid-l-comp" : nid_l_comp
 }
 
-accuracy = {}
 
-for key in architectures.keys():
-    arch = Architecture(hyper_params, architectures[key])
-    accuracy[key] = train.main(arch)
+for arch in [nid_s_arch, nid_m_arch, nid_l_arch]:
+    arch.utilisation = arch.compute_utilisation()
+    print(arch.compute_loss())
 
-with open(log_path, "wb") as cp_file:
-    pickle.dump(accuracy, cp_file)
+
+# accuracy = {}
+
+# for key in architectures.keys():
+#     arch = Architecture(hyper_params, architectures[key])
+#     accuracy[key] = train.main(arch)
+
+# with open(log_path, "wb") as cp_file:
+#     pickle.dump(accuracy, cp_file)
