@@ -141,7 +141,7 @@ class UnswNb15NeqModel(nn.Module):
 # Custom model that allows the interlayer fanin and bitwidth to be changed for all layers
 class UnswNb15NeqInterLayerModel(nn.Module):
     def __init__(self, model_config):
-        super(UnswNb15NeqModel, self).__init__()
+        super(UnswNb15NeqInterLayerModel, self).__init__()
         self.model_config = model_config
         self.num_neurons = [model_config["input_length"]] + model_config["hidden_layers"] + [model_config["output_length"]]
         layer_list = []
@@ -155,24 +155,24 @@ class UnswNb15NeqInterLayerModel(nn.Module):
 
             # Input Layer
             if i == 1:
-                input_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["input_bitwidth"], max_val=1., quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.CONST))
-                output_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["hidden_bitwidth"][i-1], max_val=1.61, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn])
-                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["input_fanin"])
+                input_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["inter_layer_bitwidth"][0], max_val=1., quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.CONST))
+                output_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["inter_layer_bitwidth"][1], max_val=1.61, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn])
+                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["inter_layer_fanin"][0])
                 layer = SparseLinearNeq(in_features, out_features, input_quant=input_quant, output_quant=output_quant, sparse_linear_kws={'mask': mask})
                 layer_list.append(layer)
 
             # Output Layer
             elif i == len(self.num_neurons)-1:
                 output_bias_scale = ScalarBiasScale(bias_init=0.33)
-                output_quant = QuantBrevitasActivation(QuantHardTanh(bit_width=model_config["ouput_bitwidth"], max_val=1.33, narrow_range=False, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn], post_transforms=[output_bias_scale])
-                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["output_fanin"])
+                output_quant = QuantBrevitasActivation(QuantHardTanh(bit_width=model_config["inter_layer_bitwidth"][-1], max_val=1.33, narrow_range=False, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn], post_transforms=[output_bias_scale])
+                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["inter_layer_fanin"][-1])
                 layer = SparseLinearNeq(in_features, out_features, input_quant=layer_list[-1].output_quant, output_quant=output_quant, sparse_linear_kws={'mask': mask}, apply_input_quant=False)
                 layer_list.append(layer)
 
             # Hidden
             else:
-                output_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["hidden_bitwidth"][i-1], max_val=1.61, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn])
-                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["hidden_fanin"][i-1])
+                output_quant = QuantBrevitasActivation(QuantReLU(bit_width=model_config["inter_layer_bitwidth"][i], max_val=1.61, quant_type=QuantType.INT, scaling_impl_type=ScalingImplType.PARAMETER), pre_transforms=[bn])
+                mask = RandomFixedSparsityMask2D(in_features, out_features, fan_in=model_config["inter_layer_fanin"][i-1])
                 layer = SparseLinearNeq(in_features, out_features, input_quant=layer_list[-1].output_quant, output_quant=output_quant, sparse_linear_kws={'mask': mask}, apply_input_quant=False)
                 layer_list.append(layer)
 

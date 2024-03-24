@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset import get_preqnt_dataset
-from models import UnswNb15NeqModel
+from models import UnswNb15NeqModel, UnswNb15NeqInterLayerModel
 
 # TODO: Replace default configs with YAML files.
 configs = {
@@ -299,16 +299,14 @@ def main(architecture, custom_hyper_params=None):
     # Instantiate model
     x, y = dataset['train'][0] 
 
+    #print(f"Input Length: {len(x)}")
+
     model_cfg = {
         "input_length": len(x),
         "output_length": 1,
         "hidden_layers": architecture.hidden_layers,
-        "input_bitwidth": architecture.input_bitwidth,
-        "hidden_bitwidth": architecture.hidden_bitwidth,
-        "output_bitwidth": architecture.output_bitwidth,
-        "input_fanin": architecture.input_fanin,
-        "hidden_fanin": architecture.hidden_fanin,
-        "output_fanin": architecture.output_fanin,
+        "inter_layer_bitwidth": architecture.inter_layer_bitwidth,
+        "inter_layer_fanin": architecture.inter_layer_fanin,
     }
 
     train_cfg = {
@@ -325,7 +323,7 @@ def main(architecture, custom_hyper_params=None):
     "checkpoint": model_hyper_params["checkpoint"],
     }
 
-    model = UnswNb15NeqModel(model_cfg)
+    model = UnswNb15NeqInterLayerModel(model_cfg)
     return train(model, dataset, train_cfg, options_cfg) # Returns accuracy.
 
 if __name__ == "__main__":

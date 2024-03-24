@@ -9,15 +9,15 @@ import torch
 import numpy as np
 from deap import base, creator, tools, algorithms
 
-from architecture import Architecture, nid_m_arch
+from architecture import Architecture
 
 # Hyper-Parameters
 hyper_params = {
     # NAS General
     "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
-    "utilisation_coeff"   : 0.04,                   # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"      : 0.96,                   # Weight of the loss function towards accuracy.
-    "unity_utilisation"   : 1105,                 # LUT utilisation considered "nominal" to normalise loss function input.
+    "utilisation_coeff"   : 0.04,                  # Weight of the loss function towards resource utilisation.
+    "accuracy_coeff"      : 0.96,                  # Weight of the loss function towards accuracy.
+    "unity_utilisation"   : 757850,                # LUT utilisation considered "nominal" to normalise loss function input. NID-M utilisation is used.
     "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
 
     # Gradient NAS Specific
@@ -27,14 +27,16 @@ hyper_params = {
 
     # Evolutionary NAS Specific
     "pop_size"            : 10,
-    "max_generations"     : 55,
+    "max_generations"     : 40,
     "crossover_prob"      : 0.5,
     "mutation_prob"       : 0.4,
     "tournsize"           : 2,
     "max_layer_size"      : 600,
     "min_layer_size"      : 5,
-    "max_bitwidth"        : 3,
-    "min_bitwidth"        : 1,   
+    "max_bitwidth"        : 2,
+    "min_bitwidth"        : 1,
+    "max_fanin"           : 7,
+    "min_fanin"           : 3,   
     "evo_log_file_path"   : "nas_runs/evo_0.txt",
     "evo_pickle_path"     : "nas_pickle/evo_0.pkl",
 
@@ -249,7 +251,11 @@ def genetic_search():
     def evaluate(individual):
         # Convert the individual back to an architecture.
         # Train it, evaluate it, and return the loss metric as fitness.
-        arch = Architecture(hyper_params, individual)
+        layers = individual[0 : individual.num_hidden_layers]
+        bitwidth = individual[individual.num_hidden_layers : 2*individual.num_hidden_layers + 3]
+        fanin = individual[2*individual.num_hidden_layers + 3 : 3*individual.num_hidden_layers + 5]
+
+        arch = Architecture(hyper_params, hidden_layers=layers, inter_layer_fanin=fanin, inter_layer_bitwidth=bitwidth)
         arch.evaluate()
         
         # These attributes allow for better logging and debugging.
@@ -262,30 +268,56 @@ def genetic_search():
     # Returns a DEAP Individual object that contains the parameters. 
     def create_random_individual(num_layers):
 
+        ### Generate Layer Size ###
         individual=[random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])]
 
         # We want our layer size as a descending list:
         for i in range(num_layers - 1):
             individual.append(random.randint(hyper_params["min_layer_size"], individual[i]))
+        ### End Generate Layer Size ###
 
-        #print(f"[DEBUG] create_random_individual() called. Returning: {individual}")
+        ### Generate Bitwidth ###
+        for i in range(num_layers + 3):
+            individual.append(random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"]))
+        ### End Generate Bitwidth ###
+            
+        ### Generate Fanin ###
+        for i in range(num_layers + 2):
+            individual.append(random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"]))
+        ### End Generate Fanin ###
 
-        return creator.Individual(individual)
+        deap_indv = creator.Individual(individual)
+        deap_indv.num_hidden_layers = num_layers
+        return deap_indv
     
     # Mutate individual while maintaining descending layer size.
-    def mutate_layer_size(individual, indpb):
-        
-        if random.random() <= indpb > 0.3:
+    def mutate(individual, indpb):
+
+        ### Layer Size Mutation ###
+        if random.random() <= indpb:
             individual[0] = random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])
                                            
-        for i in range(len(individual) - 1):
+        for i in range(individual.num_hidden_layers - 1):
             if random.random() <= indpb:
                 individual[i + 1] = random.randint(hyper_params["min_layer_size"], individual[i])
+        ### End Layer Size Mutation ###
+                
+        ### Inter-Layer Bitwidth Mutation ###
+        for i in range(individual.num_hidden_layers, 2*individual.num_hidden_layers + 3):
+            if random.random() <= indpb:
+                individual[i] = random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"])
+        ### End Inter-Layer Bitwidth Mutation ###
+                
+        ### Inter-Layer Fanin Mutation ###
+        for i in range(2*individual.num_hidden_layers + 3, 3*individual.num_hidden_layers + 5):
+            if random.random() <= indpb:
+                individual[i] = random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"])
+        ### End Inter-Layer Fanin Mutation ###
 
         return (individual,)
     
     # Cross individuals while maintaining descending layer size.
-    def crossover_layer_size(indv1, indv2):
+    def crossover(indv1, indv2):
 
         # Perform cross at a randomly chosen point.
         cross_position = random.randint(0, len(indv1) - 1)
@@ -294,9 +326,9 @@ def genetic_search():
         indv1[cross_position] = p2
         indv2[cross_position] = p1
 
-        # Check for descending constraint violation
+        # Check for descending constraint violation for layer size only.
         for indv in [indv1, indv2]:
-            for i in range(1, len(indv)):
+            for i in range(1, indv.num_hidden_layers):
                 if indv[i] > indv[i - 1]:
                     indv[i] = random.randint(hyper_params["min_layer_size"], indv[i - 1])
 
@@ -333,7 +365,7 @@ def genetic_search():
 
     # Define the fitness criterion - weight is negetive since we want to minimise the loss function.
     creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMin, proxy_accuracy=None, utilisation=None) # The proxy_accuracy and utilisation attributes just allow easier logging. They are set in the evaluate() function.
+    creator.create("Individual", list, fitness=creator.FitnessMin, proxy_accuracy=None, utilisation=None, num_hidden_layers=None) # The proxy_accuracy and utilisation attributes just allow easier logging. They are set in the evaluate() function.
 
     toolbox = base.Toolbox()
 
@@ -342,8 +374,8 @@ def genetic_search():
     toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=hyper_params["pop_size"]) # Create a random population
     
     toolbox.register("evaluate", evaluate)
-    toolbox.register("mate", crossover_layer_size)  # Crossover
-    toolbox.register("mutate", mutate_layer_size, indpb=0.3)  # Mutation
+    toolbox.register("mate", crossover)  # Crossover
+    toolbox.register("mutate", mutate, indpb=0.3)  # Mutation
     toolbox.register("select", tools.selTournament, tournsize=hyper_params["tournsize"])
 
     ### Main Evolutionary Code ###
