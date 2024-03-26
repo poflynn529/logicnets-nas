@@ -34,7 +34,7 @@ hyper_params = {
     "gene_crossover_prob" : 0.2,
     "mutation_prob"       : 0.4,
     "gene_mutation_prob"  : 0.3,
-    "tourn_size"          : 2,
+    "tourn_size"          : 3,
     "max_layer_size"      : 593,
     "min_layer_size"      : 5,
     "max_bitwidth"        : 2,
@@ -42,14 +42,15 @@ hyper_params = {
     "max_fanin"           : 7,
     "min_fanin"           : 3,
     "elitism"             : 1,
-    "randoms"             : 2,   
+    "randoms"             : 1,   
     "evo_log_file_path"   : "evo_logs/evo_0.txt",
-    "evo_pickle_path"     : "nas_pickle/test1.pkl",
+    "evo_pickle_path"     : "nas_pickle/acc_0.96_util_0.04_hl_4_10_40.pkl",
+    "evo_seed_path"       : "nas_pickle/seed0.pkl",
 
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 1,
+    "epochs": 25,
     "learning_rate": 1e-1,
     "seed": None,
     "checkpoint": None,
@@ -235,10 +236,17 @@ def genetic_search():
             df = pd.read_pickle(df_log_path)
         else:
             print("[NAS] Pickle Log does not exist, creating new DataFrame.")
-            df = pd.DataFrame(columns=['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness', 'evaluated'])
+            df = pd.DataFrame(columns=['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness', 'evaluated', 'training_epochs', 'learning_rate'])
 
         return df
     
+    def load_seed(seed_path):
+        print("[NAS] Loading seed information...")
+        df = pd.read_pickle(seed_path)
+        for idx in df.index.tolist():
+            df.loc[idx, "hash"] = Architecture.compute_hash(df.loc[idx, "hidden_layers"], df.loc[idx, "inter_layer_bitwidth"], df.loc[idx, "inter_layer_fanin"])
+        return df
+
     def save_log(gen, pop, log, filename=hyper_params["evo_log_file_path"]):
         with open(filename, 'a', newline='\n') as file:
             print("Writing Log...")
@@ -260,14 +268,23 @@ def genetic_search():
         print(f"[NAS-Evaluate] {len(not_evaluated.index.tolist())} evaluation(s) to do...")
 
         for idx in not_evaluated.index.tolist():
-            # To-Do
-            arch = Architecture(hyper_params, hidden_layers=df.loc[idx, "hidden_layers"], inter_layer_bitwidth=df.loc[idx, "inter_layer_bitwidth"], inter_layer_fanin=df.loc[idx, "inter_layer_fanin"])
-            arch.evaluate()
-            
-            df.loc[idx, "proxy_utilisation"] = arch.utilisation
-            df.loc[idx, "proxy_accuracy"] = arch.accuracy
-            df.loc[idx, "fitness"] = arch.loss
-            df.loc[idx, "evaluated"] = True
+            if not_evaluated.loc[idx, "hash"] in df[df["evaluated"] == True]["hash"].values:
+                matched_architecture = df[df["hash"] == not_evaluated.loc[idx, "hash"]].iloc[0]
+                df.loc[idx, "proxy_utilisation"] = matched_architecture["proxy_utilisation"]
+                df.loc[idx, "proxy_accuracy"] = matched_architecture["proxy_accuracy"]
+                df.loc[idx, "fitness"] = matched_architecture["fitness"]
+                df.loc[idx, "evaluated"] = True
+                print(f"[NAS-Evaluate] Found matching architecture for {df.loc[idx, 'hash']}.")
+            else:
+                arch = Architecture(hyper_params, hidden_layers=df.loc[idx, "hidden_layers"], inter_layer_bitwidth=df.loc[idx, "inter_layer_bitwidth"], inter_layer_fanin=df.loc[idx, "inter_layer_fanin"])
+                arch.evaluate()
+                
+                df.loc[idx, "proxy_utilisation"] = arch.utilisation
+                df.loc[idx, "proxy_accuracy"] = arch.accuracy
+                df.loc[idx, "fitness"] = arch.loss
+                df.loc[idx, "evaluated"] = True
+                df.loc[idx, "training_epochs"] = hyper_params["epochs"]
+                df.loc[idx, "learning_rate"] = hyper_params["learning_rate"]
 
     
     # Returns a DEAP Individual object that contains the parameters. 
@@ -336,21 +353,45 @@ def genetic_search():
             individual["hidden_layers"] = hidden_layers
             individual["inter_layer_bitwidth"] = inter_layer_bitwidth
             individual["inter_layer_fanin"] = inter_layer_fanin
+            individual["hash"] = Architecture.compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin)
 
         return individual
     
+    def serialise_params(pd_obj):
+
+        if type(pd_obj) == type(pd.DataFrame(dtype=object)):
+            serial_list = pd_obj["hidden_layers"].iloc[0] + pd_obj["inter_layer_bitwidth"].iloc[0] + pd_obj["inter_layer_fanin"].iloc[0]
+            #print(f"[DEBUG] serialise_params() returning: {serial_list} from DataFrame")
+        elif type(pd_obj) == type(pd.Series(dtype=object)):
+            serial_list = pd_obj["hidden_layers"] + pd_obj["inter_layer_bitwidth"] + pd_obj["inter_layer_fanin"]
+            #print(f"[DEBUG] serialise_params() returning: {serial_list} from Series")
+        else:
+            raise(TypeError(f"serialise_params() does not support type: {type(pd_obj)}. Object len: {len(pd_obj)}. Supported types: {type(pd.DataFrame())}, {type(pd.Series())}."))
+
+        return serial_list
+    
+    def deserialise_params(list_obj):
+
+        params_dict = {
+            "hidden_layers"        : list_obj[0:hyper_params["hidden_layers"]],
+            "inter_layer_bitwidth" : list_obj[hyper_params["hidden_layers"]:hyper_params["hidden_layers"]*2 + 3],
+            "inter_layer_fanin"    : list_obj[hyper_params["hidden_layers"]*2 + 3:hyper_params["hidden_layers"]*3 + 5],
+        }
+
+        return params_dict
+    
     # Cross individuals while maintaining descending layer size.
     def crossover(df):
-        
-        print(df)
 
+        df = df.reset_index(drop=True) # Index must be reset, otherwise duplicate individuals will be lumped together by the for loop.
+        #print(df)
         for i in df.index.tolist():
             if random.random() <= hyper_params["crossover_prob"]:
-                indv1 = df.loc[i, "hidden_layers"] + df.loc[i, "inter_layer_bitwidth"] + df.loc[i, "inter_layer_fanin"]
-                indv2 = df.sample(1)["hidden_layers"].iloc[0] + df.sample(1)["inter_layer_bitwidth"].iloc[0] + df.sample(1)["inter_layer_fanin"].iloc[0]
+                indv1 = serialise_params(df.loc[i])
+                indv2 = serialise_params(df.sample(1))
 
-                print(f"[DEBUG] indv1: {indv1}")
-                print(f"[DEBUG] indv2: {indv2}")
+                # print(f"[DEBUG] indv1: {indv1}")
+                # print(f"[DEBUG] indv2: {indv2}")
 
                 # Perform cross at n randomly chosen points.
                 for j in range(int(hyper_params["gene_crossover_prob"] * hyper_params["hidden_layers"] * 3 + 5)):
@@ -362,9 +403,18 @@ def genetic_search():
                     if indv1[j] > indv1[j - 1]:
                         indv1[j] = random.randint(hyper_params["min_layer_size"], indv1[j - 1])
 
-                df.loc[i, "hidden_layers"] = indv1[0:hyper_params["hidden_layers"]]
-                df.loc[i, "inter_layer_bitwidth"] = indv1[hyper_params["hidden_layers"]:hyper_params["hidden_layers"]*2 + 3]
-                df.loc[i, "inter_layer_fanin"] = indv1[hyper_params["hidden_layers"]*2 + 3:hyper_params["hidden_layers"]*3 + 2]
+                # print(f"Hidden Layers: {indv1[0:hyper_params['hidden_layers']]}, Existing Value: {df.loc[i, 'hidden_layers']}")
+                # print(f"Inter Layer Bitwidth: {indv1[hyper_params['hidden_layers']:hyper_params['hidden_layers']*2 + 3]}, Existing Value: {df.loc[i, 'inter_layer_bitwidth']}")
+                # print(f"Inter Layer Fanin: {indv1[hyper_params['hidden_layers']*2 + 3:hyper_params['hidden_layers']*3 + 5]}, Existing Value: {df.loc[i, 'inter_layer_fanin']}")
+
+                # print(f"New Type: {type(indv1[0:hyper_params['hidden_layers']])}, Existing Type: {type(df.loc[i, 'hidden_layers'])}")
+
+                params_dict = deserialise_params(indv1)
+
+                df.at[i, "hidden_layers"] = params_dict["hidden_layers"]
+                df.at[i, "inter_layer_bitwidth"] = params_dict["inter_layer_bitwidth"]
+                df.at[i, "inter_layer_fanin"] = params_dict["inter_layer_fanin"]
+                df.at[i, "hash"] = Architecture.compute_hash(params_dict["hidden_layers"], params_dict["inter_layer_bitwidth"], params_dict["inter_layer_fanin"])
 
         return df
 
@@ -376,7 +426,9 @@ def genetic_search():
         ### Tournament ###
         for i in range(hyper_params["pop_size"] - hyper_params["elitism"] - hyper_params["randoms"]):
             # Randomly select a number of individuals from the population and add them for mutation.
-            new_population = new_population.append(df.loc[df.sample(hyper_params["tourn_size"])["fitness"].idxmax()])
+            new_population = new_population.append(df.loc[df.sample(hyper_params["tourn_size"])["fitness"].idxmin()])
+
+        print(f"\nTournament Selection:\n\n{new_population}\n")
         
         ### Mutation ###
         new_population = new_population.apply(mutate, axis=1)
@@ -385,14 +437,12 @@ def genetic_search():
         new_population = crossover(new_population)
 
         ### Elitism & Randoms ###
-        new_population = new_population.append(df.nlargest(hyper_params["elitism"], "fitness")) # Elitism
+        new_population = new_population.append(df.nsmallest(hyper_params["elitism"], "fitness")) # Elitism
         for i in range(hyper_params["randoms"]):
             new_population = new_population.append(create_random_individual(hyper_params=hyper_params, gen=df["gen"].max()), ignore_index=True) # Randoms
 
         new_population["gen"] += 1
         new_population["evaluated"] = False
-
-        print(new_population)
 
         return new_population
 
@@ -404,10 +454,10 @@ def genetic_search():
         if pd.isna(df["gen"].max()):
             start_gen = 0
             # Seed individuals
-            # To-Do
+            df = load_seed(hyper_params["evo_seed_path"])
 
-            # Create n random individuals
-            for i in range(hyper_params["pop_size"]):
+            # Create (n - seed) random individuals
+            for i in range(hyper_params["pop_size"] - len(df)):
                 df = df.append(create_random_individual(hyper_params=hyper_params, gen=start_gen), ignore_index=True)
                 
         else:
@@ -417,16 +467,22 @@ def genetic_search():
         for i in range(start_gen + 1, ngen):
             
             evaluate(df) # Ensure all individuals currently in the population have been evaluated.
-            #print(df[df["gen"] == i - 1])
-            df = df.append(evolvePop(df[df["gen"] == i - 1], hyper_params=hyper_params), ignore_index=True)
-            #print(df)
+            df = df.append(evolvePop(df[df["gen"] == i - 1].copy(), hyper_params=hyper_params), ignore_index=True) # Copy the last generation and evolve a new one.
             evaluate(df)
+            if verbose:
+                print(f"\n{df[df['gen'] == i][['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
 
             save_checkpoint(df, df_log_path) # Save checkpoint to allow analysis and interrupted execution.
 
             if verbose:
                 current_gen = df[df["gen"] == i]
-                print(f"Generation: {i}, FitnessMax: {current_gen['fitness'].max()}, FitnessMin: {current_gen['fitness'].max()}, FitnessAvg: {current_gen['fitness'].mean()}")
+                print(f"\nGeneration: {i}, FitnessMax: {round(current_gen['fitness'].max(), 4)}, FitnessMin: {round(current_gen['fitness'].min(), 4)}, FitnessAvg: {round(current_gen['fitness'].mean(), 4)}\n")
+                print("#############################################################################################\n")
+
+        print("[NAS] Search Complete! Top 5 Architectures:")
+        df["fitness"] = pd.to_numeric(df["fitness"])
+        print(df.nsmallest(5, "fitness"))
+
 
 
     # Main evolutionary function
