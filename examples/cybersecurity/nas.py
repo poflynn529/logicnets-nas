@@ -7,6 +7,7 @@ import os
 
 import torch
 import numpy as np
+import pandas as pd
 from deap import base, creator, tools, algorithms
 
 from architecture import Architecture
@@ -26,24 +27,29 @@ hyper_params = {
     "grad_max_iterations" : 100,                   # Maximum amount of architecture explorations per execution of this script
 
     # Evolutionary NAS Specific
+    "hidden_layers"       : 4,
     "pop_size"            : 10,
     "max_generations"     : 40,
     "crossover_prob"      : 0.5,
+    "gene_crossover_prob" : 0.2,
     "mutation_prob"       : 0.4,
-    "tournsize"           : 2,
-    "max_layer_size"      : 600,
+    "gene_mutation_prob"  : 0.3,
+    "tourn_size"          : 2,
+    "max_layer_size"      : 593,
     "min_layer_size"      : 5,
     "max_bitwidth"        : 2,
     "min_bitwidth"        : 1,
     "max_fanin"           : 7,
-    "min_fanin"           : 3,   
-    "evo_log_file_path"   : "nas_runs/evo_0.txt",
-    "evo_pickle_path"     : "nas_pickle/evo_0.pkl",
+    "min_fanin"           : 3,
+    "elitism"             : 1,
+    "randoms"             : 2,   
+    "evo_log_file_path"   : "evo_logs/evo_0.txt",
+    "evo_pickle_path"     : "nas_pickle/test1.pkl",
 
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 25,
+    "epochs": 1,
     "learning_rate": 1e-1,
     "seed": None,
     "checkpoint": None,
@@ -220,25 +226,25 @@ def gradient_search():
 def genetic_search():
 
     # Allow checkpointing using pickle so that we can stop/start the algorithm.
-    def save_checkpoint(population, generation, hof, filename=hyper_params["evo_pickle_path"]):
-        with open(filename, "wb") as cp_file:
-            pickle.dump({
-                "population": population,
-                "generation": generation,
-                "hof": hof
-                # Include other relevant data here
-            }, cp_file)
+    def save_checkpoint(df, filename=hyper_params["evo_pickle_path"]):
+        print("[NAS] Saving Checkpoint...")
+        df.to_pickle(filename)
 
-    def load_checkpoint(filename=hyper_params["evo_pickle_path"]):
-        with open(filename, "rb") as cp_file:
-            checkpoint_data = pickle.load(cp_file)
-        return checkpoint_data
+    def load_checkpoint(df_log_path=hyper_params["evo_pickle_path"]):
+        if os.path.exists(df_log_path):
+            df = pd.read_pickle(df_log_path)
+        else:
+            print("[NAS] Pickle Log does not exist, creating new DataFrame.")
+            df = pd.DataFrame(columns=['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness', 'evaluated'])
+
+        return df
     
     def save_log(gen, pop, log, filename=hyper_params["evo_log_file_path"]):
         with open(filename, 'a', newline='\n') as file:
+            print("Writing Log...")
             file.write(f"\n###### Generation {gen} ######\n\n")
             for i, individual in enumerate(pop):
-                file.write(f"INDV {i}:\t{str(individual)}, Fitness: {individual.fitness.values}, \n")
+                file.write(f"INDV {i}:\t{str(individual)}, Fitness: {individual.fitness.values}, Accuracy: {round(individual.proxy_accuracy, 3)}, Utilisation: {individual.utilisation}\n")
             file.write("\nLog:\n\n")
             file.write(str(log))
             file.write("\n")
@@ -248,91 +254,179 @@ def genetic_search():
             file.write(f"\n###### Hall of Fame ######\n\n")
             file.write(f"{hof}\n\n")
     
-    def evaluate(individual):
-        # Convert the individual back to an architecture.
-        # Train it, evaluate it, and return the loss metric as fitness.
-        layers = individual[0 : individual.num_hidden_layers]
-        bitwidth = individual[individual.num_hidden_layers : 2*individual.num_hidden_layers + 3]
-        fanin = individual[2*individual.num_hidden_layers + 3 : 3*individual.num_hidden_layers + 5]
+    def evaluate(df):
 
-        arch = Architecture(hyper_params, hidden_layers=layers, inter_layer_fanin=fanin, inter_layer_bitwidth=bitwidth)
-        arch.evaluate()
-        
-        # These attributes allow for better logging and debugging.
-        individual.proxy_accuracy = arch.accuracy
-        individual.utilisation = arch.utilisation
+        not_evaluated = df[df["evaluated"] == False]
+        print(f"[NAS-Evaluate] {len(not_evaluated.index.tolist())} evaluation(s) to do...")
 
-        # Loss must be returned as a tuple for the DEAP algorithm to work.
-        return (arch.loss,)
+        for idx in not_evaluated.index.tolist():
+            # To-Do
+            arch = Architecture(hyper_params, hidden_layers=df.loc[idx, "hidden_layers"], inter_layer_bitwidth=df.loc[idx, "inter_layer_bitwidth"], inter_layer_fanin=df.loc[idx, "inter_layer_fanin"])
+            arch.evaluate()
+            
+            df.loc[idx, "proxy_utilisation"] = arch.utilisation
+            df.loc[idx, "proxy_accuracy"] = arch.accuracy
+            df.loc[idx, "fitness"] = arch.loss
+            df.loc[idx, "evaluated"] = True
+
     
     # Returns a DEAP Individual object that contains the parameters. 
-    def create_random_individual(num_layers):
+    def create_random_individual(hyper_params, gen):
 
         ### Generate Layer Size ###
-        individual=[random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])]
+        hidden_layers=[random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])]
 
         # We want our layer size as a descending list:
-        for i in range(num_layers - 1):
-            individual.append(random.randint(hyper_params["min_layer_size"], individual[i]))
+        for i in range(hyper_params["hidden_layers"] - 1):
+            hidden_layers.append(random.randint(hyper_params["min_layer_size"], hidden_layers[i]))
         ### End Generate Layer Size ###
 
         ### Generate Bitwidth ###
-        for i in range(num_layers + 3):
-            individual.append(random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"]))
+        inter_layer_bitwidth = []
+        for i in range(hyper_params["hidden_layers"] + 3):
+            inter_layer_bitwidth.append(random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"]))
         ### End Generate Bitwidth ###
             
         ### Generate Fanin ###
-        for i in range(num_layers + 2):
-            individual.append(random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"]))
+        inter_layer_fanin = []
+        for i in range(hyper_params["hidden_layers"] + 2):
+            inter_layer_fanin.append(random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"]))
         ### End Generate Fanin ###
 
-        deap_indv = creator.Individual(individual)
-        deap_indv.num_hidden_layers = num_layers
-        return deap_indv
+        individual = {
+            'gen'  : gen,
+            'hash' : Architecture.compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin),
+            'hidden_layers' : hidden_layers,
+            'inter_layer_bitwidth' : inter_layer_bitwidth,
+            'inter_layer_fanin' : inter_layer_fanin,
+            'evaluated' : False
+        }
+
+        return individual
     
     # Mutate individual while maintaining descending layer size.
-    def mutate(individual, indpb):
+    def mutate(individual):
 
-        ### Layer Size Mutation ###
-        if random.random() <= indpb:
-            individual[0] = random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])
-                                           
-        for i in range(individual.num_hidden_layers - 1):
-            if random.random() <= indpb:
-                individual[i + 1] = random.randint(hyper_params["min_layer_size"], individual[i])
-        ### End Layer Size Mutation ###
-                
-        ### Inter-Layer Bitwidth Mutation ###
-        for i in range(individual.num_hidden_layers, 2*individual.num_hidden_layers + 3):
-            if random.random() <= indpb:
-                individual[i] = random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"])
-        ### End Inter-Layer Bitwidth Mutation ###
-                
-        ### Inter-Layer Fanin Mutation ###
-        for i in range(2*individual.num_hidden_layers + 3, 3*individual.num_hidden_layers + 5):
-            if random.random() <= indpb:
-                individual[i] = random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"])
-        ### End Inter-Layer Fanin Mutation ###
+        if random.random() <= hyper_params["mutation_prob"]:
+            hidden_layers = individual["hidden_layers"]
+            inter_layer_bitwidth = individual["inter_layer_bitwidth"]
+            inter_layer_fanin = individual["inter_layer_fanin"]
 
-        return (individual,)
+            ### Layer Size Mutation ###
+            if random.random() <= hyper_params["gene_mutation_prob"]:
+                hidden_layers[0] = random.randint(hyper_params["min_layer_size"], hyper_params["max_layer_size"])
+                                            
+            for i in range(len(hidden_layers) - 1):
+                if random.random() <= hyper_params["gene_mutation_prob"]:
+                    hidden_layers[i + 1] = random.randint(hyper_params["min_layer_size"], hidden_layers[i])
+            ### End Layer Size Mutation ###
+                    
+            ### Inter-Layer Bitwidth Mutation ###
+            for i in range(len(inter_layer_bitwidth)):
+                if random.random() <= hyper_params["gene_mutation_prob"]:
+                    inter_layer_bitwidth[i] = random.randint(hyper_params["min_bitwidth"], hyper_params["max_bitwidth"])
+            ### End Inter-Layer Bitwidth Mutation ###
+                    
+            ### Inter-Layer Fanin Mutation ###
+            for i in range(len(inter_layer_fanin)):
+                if random.random() <= hyper_params["gene_mutation_prob"]:
+                    inter_layer_fanin[i] = random.randint(hyper_params["min_fanin"], hyper_params["max_fanin"])
+            ### End Inter-Layer Fanin Mutation ###
+
+            individual["hidden_layers"] = hidden_layers
+            individual["inter_layer_bitwidth"] = inter_layer_bitwidth
+            individual["inter_layer_fanin"] = inter_layer_fanin
+
+        return individual
     
     # Cross individuals while maintaining descending layer size.
-    def crossover(indv1, indv2):
+    def crossover(df):
+        
+        print(df)
 
-        # Perform cross at a randomly chosen point.
-        cross_position = random.randint(0, len(indv1) - 1)
-        p1 = indv1[cross_position]
-        p2 = indv2[cross_position]
-        indv1[cross_position] = p2
-        indv2[cross_position] = p1
+        for i in df.index.tolist():
+            if random.random() <= hyper_params["crossover_prob"]:
+                indv1 = df.loc[i, "hidden_layers"] + df.loc[i, "inter_layer_bitwidth"] + df.loc[i, "inter_layer_fanin"]
+                indv2 = df.sample(1)["hidden_layers"].iloc[0] + df.sample(1)["inter_layer_bitwidth"].iloc[0] + df.sample(1)["inter_layer_fanin"].iloc[0]
 
-        # Check for descending constraint violation for layer size only.
-        for indv in [indv1, indv2]:
-            for i in range(1, indv.num_hidden_layers):
-                if indv[i] > indv[i - 1]:
-                    indv[i] = random.randint(hyper_params["min_layer_size"], indv[i - 1])
+                print(f"[DEBUG] indv1: {indv1}")
+                print(f"[DEBUG] indv2: {indv2}")
 
-        return (indv1, indv2)
+                # Perform cross at n randomly chosen points.
+                for j in range(int(hyper_params["gene_crossover_prob"] * hyper_params["hidden_layers"] * 3 + 5)):
+                    cross_position = random.randint(0, len(indv1) - 1)
+                    indv1[cross_position] = indv2[cross_position]
+
+                # Check for descending constraint violation for layer size only.
+                for j in range(1, hyper_params["hidden_layers"]):
+                    if indv1[j] > indv1[j - 1]:
+                        indv1[j] = random.randint(hyper_params["min_layer_size"], indv1[j - 1])
+
+                df.loc[i, "hidden_layers"] = indv1[0:hyper_params["hidden_layers"]]
+                df.loc[i, "inter_layer_bitwidth"] = indv1[hyper_params["hidden_layers"]:hyper_params["hidden_layers"]*2 + 3]
+                df.loc[i, "inter_layer_fanin"] = indv1[hyper_params["hidden_layers"]*2 + 3:hyper_params["hidden_layers"]*3 + 2]
+
+        return df
+
+    def evolvePop(df, hyper_params):
+        
+        new_population = pd.DataFrame(columns=df.columns.tolist())
+        df["fitness"] = pd.to_numeric(df["fitness"], errors='coerce') # Workaround for bug in older pandas version.
+
+        ### Tournament ###
+        for i in range(hyper_params["pop_size"] - hyper_params["elitism"] - hyper_params["randoms"]):
+            # Randomly select a number of individuals from the population and add them for mutation.
+            new_population = new_population.append(df.loc[df.sample(hyper_params["tourn_size"])["fitness"].idxmax()])
+        
+        ### Mutation ###
+        new_population = new_population.apply(mutate, axis=1)
+
+        ### Crossover ###
+        new_population = crossover(new_population)
+
+        ### Elitism & Randoms ###
+        new_population = new_population.append(df.nlargest(hyper_params["elitism"], "fitness")) # Elitism
+        for i in range(hyper_params["randoms"]):
+            new_population = new_population.append(create_random_individual(hyper_params=hyper_params, gen=df["gen"].max()), ignore_index=True) # Randoms
+
+        new_population["gen"] += 1
+        new_population["evaluated"] = False
+
+        print(new_population)
+
+        return new_population
+
+    def eaCustom(hyper_params, df_log_path, ngen, seed_individuals_path=None, text_log_path=None, verbose=False):
+        
+        df = load_checkpoint(df_log_path)
+
+        # Find the current maximum generation and enter the evolutionary loop.
+        if pd.isna(df["gen"].max()):
+            start_gen = 0
+            # Seed individuals
+            # To-Do
+
+            # Create n random individuals
+            for i in range(hyper_params["pop_size"]):
+                df = df.append(create_random_individual(hyper_params=hyper_params, gen=start_gen), ignore_index=True)
+                
+        else:
+            start_gen = int(df["gen"].max())
+            print(f"[NAS] Previously loaded generations: {start_gen + 1}")
+        
+        for i in range(start_gen + 1, ngen):
+            
+            evaluate(df) # Ensure all individuals currently in the population have been evaluated.
+            #print(df[df["gen"] == i - 1])
+            df = df.append(evolvePop(df[df["gen"] == i - 1], hyper_params=hyper_params), ignore_index=True)
+            #print(df)
+            evaluate(df)
+
+            save_checkpoint(df, df_log_path) # Save checkpoint to allow analysis and interrupted execution.
+
+            if verbose:
+                current_gen = df[df["gen"] == i]
+                print(f"Generation: {i}, FitnessMax: {current_gen['fitness'].max()}, FitnessMin: {current_gen['fitness'].max()}, FitnessAvg: {current_gen['fitness'].mean()}")
 
 
     # Main evolutionary function
@@ -376,7 +470,7 @@ def genetic_search():
     toolbox.register("evaluate", evaluate)
     toolbox.register("mate", crossover)  # Crossover
     toolbox.register("mutate", mutate, indpb=0.3)  # Mutation
-    toolbox.register("select", tools.selTournament, tournsize=hyper_params["tournsize"])
+    toolbox.register("select", tools.selTournament, tournsize=hyper_params["tourn_size"])
 
     ### Main Evolutionary Code ###
     hof = tools.HallOfFame(3)  # Hall of Fame to store the best individual
@@ -386,7 +480,7 @@ def genetic_search():
     stats.register("min", np.min)
     stats.register("max", np.max)
 
-    ga_loop(toolbox, stats, hof, ngen=hyper_params["max_generations"])
+    eaCustom(hyper_params=hyper_params, df_log_path=hyper_params["evo_pickle_path"], ngen=40, verbose=True)
 
 
 # Main function

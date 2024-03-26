@@ -76,7 +76,7 @@ class ArchitectureOld:
 
 class Architecture:
 
-    def __init__(self, hyper_params, hidden_layers, inter_layer_fanin, inter_layer_bitwidth, accuracy = None, utilisation = None, loss = None, hash = None):
+    def __init__(self, hyper_params, hidden_layers, inter_layer_bitwidth, inter_layer_fanin, accuracy = None, utilisation = None, loss = None, hash = None):
 
         # Valid input checks
         # The +3 derives from Hidden Layers + Input Layer + Output Layer + 1
@@ -89,8 +89,8 @@ class Architecture:
 
         self.hyper_params = hyper_params
         self.hidden_layers = hidden_layers
-        self.inter_layer_fanin = inter_layer_fanin
         self.inter_layer_bitwidth = inter_layer_bitwidth
+        self.inter_layer_fanin = inter_layer_fanin
         self.accuracy = accuracy
         self.utilisation = utilisation
         self.loss = loss
@@ -137,15 +137,15 @@ class Architecture:
         #print(f"[DEBUG] Final Validation Accuracy: {self.accuracy}")
         self.utilisation = self.compute_utilisation()
         self.loss = self.compute_loss()
-        self.hash = Architecture.compute_hash(self.hidden_layers)
+        self.hash = Architecture.compute_hash(self.hidden_layers, self.inter_layer_bitwidth, self.inter_layer_fanin)
 
     def final_eval(self, custom_hyper_params):
         return np.max(train.main(self, custom_hyper_params)) / 100, self.compute_utilisation()
         
     @staticmethod
-    def compute_hash(layers):
+    def compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin):
         hash_object = hashlib.md5()
-        hash_object.update(str(layers).encode())
+        hash_object.update(str([hidden_layers, inter_layer_bitwidth, inter_layer_fanin]).encode())
         return hash_object.hexdigest()
 
     def get_csv_data(self):
@@ -156,7 +156,7 @@ class Architecture:
     def load_from_csv(hyper_params, row, csv_index):
         return Architecture(hyper_params, hidden_layers=ast.literal_eval(row[csv_index["layers"]]), accuracy=float(row[csv_index["accuracy"]]), utilisation=int(row[csv_index["utilisation"]]), loss=float(row[csv_index["loss"]]), hash=row[csv_index["hash"]])
 
-nid_m = Architecture(None, [593, 256, 128, 128], [7, 7, 7, 7, 7, 7], [1, 2, 2, 2, 2, 2, 2])
+nid_m = Architecture(None, [593, 256, 128, 128], [1, 2, 2, 2, 2, 2, 2], [7, 7, 7, 7, 7, 7])
 nid_m_comp = [593, 256, 49, 7]
 nid_s = [593, 100]
 nid_s_comp = [49, 7]
