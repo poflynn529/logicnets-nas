@@ -35,6 +35,7 @@ __pycache__/*
 .settings
 .idea
 tags
+miniconda/
 
 # Package files
 *.egg
