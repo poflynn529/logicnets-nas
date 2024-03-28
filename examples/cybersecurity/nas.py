@@ -4,6 +4,7 @@ import csv
 import random
 import pickle
 import os
+import copy
 
 import torch
 import numpy as np
@@ -34,7 +35,7 @@ hyper_params = {
     "gene_crossover_prob" : 0.2,
     "mutation_prob"       : 0.4,
     "gene_mutation_prob"  : 0.3,
-    "tourn_size"          : 3,
+    "tourn_size"          : 2,
     "max_layer_size"      : 593,
     "min_layer_size"      : 5,
     "max_bitwidth"        : 2,
@@ -44,13 +45,13 @@ hyper_params = {
     "elitism"             : 1,
     "randoms"             : 1,   
     "evo_log_file_path"   : "evo_logs/evo_0.txt",
-    "evo_pickle_path"     : "nas_pickle/acc_0.96_util_0.04_hl_4_10_40.pkl",
+    "evo_pickle_path"     : "nas_pickle/test_0.98_util_0.02_hl_4_10_40.pkl",
     "evo_seed_path"       : "nas_pickle/seed0.pkl",
 
     # Training
     "weight_decay": 0.0,
     "batch_size": 1024,
-    "epochs": 25,
+    "epochs": 1,
     "learning_rate": 1e-1,
     "seed": None,
     "checkpoint": None,
@@ -228,11 +229,12 @@ def genetic_search():
 
     # Allow checkpointing using pickle so that we can stop/start the algorithm.
     def save_checkpoint(df, filename=hyper_params["evo_pickle_path"]):
-        print("[NAS] Saving Checkpoint...")
+        print(f"[NAS] Saving checkpoint to {filename}.")
         df.to_pickle(filename)
 
     def load_checkpoint(df_log_path=hyper_params["evo_pickle_path"]):
         if os.path.exists(df_log_path):
+            print(f"[NAS] Loading checkpoint from {df_log_path}.")
             df = pd.read_pickle(df_log_path)
         else:
             print("[NAS] Pickle Log does not exist, creating new DataFrame.")
@@ -261,20 +263,39 @@ def genetic_search():
         with open(filename, 'a', newline='\n') as file:
             file.write(f"\n###### Hall of Fame ######\n\n")
             file.write(f"{hof}\n\n")
+
+    def validate(df):
+        # Ensure architectures with the same hash have the same parameters.
+        groups = df.drop("gen", axis=1).groupby("hash")
+        for name, group in groups:
+            for idx in group.index:
+                if not (group.loc[idx] == group.iloc[0]).all():
+                    save_checkpoint(df)
+                    raise ValueError(f"Hash {group['hash'].iloc[0]} contains different architectures!")
+
+        # Ensure dataframe is maintaining a consistent index.
+        if not df.index.is_unique:
+            save_checkpoint(df)
+            raise(ValueError(f"Index values are not unique!"))
     
     def evaluate(df):
 
-        not_evaluated = df[df["evaluated"] == False]
-        print(f"[NAS-Evaluate] {len(not_evaluated.index.tolist())} evaluation(s) to do...")
+        not_evaluated_index = df[df["evaluated"] == False].index.tolist()
+        print(f"[NAS-Evaluate] {len(not_evaluated_index)} evaluation(s) to do at indexes: {not_evaluated_index}")
 
-        for idx in not_evaluated.index.tolist():
-            if not_evaluated.loc[idx, "hash"] in df[df["evaluated"] == True]["hash"].values:
-                matched_architecture = df[df["hash"] == not_evaluated.loc[idx, "hash"]].iloc[0]
+        for idx in not_evaluated_index:
+            
+            df.loc[idx, "hash"] = Architecture.compute_hash(df.loc[idx, "hidden_layers"], inter_layer_bitwidth=df.loc[idx, "inter_layer_bitwidth"], inter_layer_fanin=df.loc[idx, "inter_layer_fanin"])
+
+            if df.loc[idx, "hash"] in df[df["evaluated"] == True]["hash"].values:
+                matched_architecture = df[(df["hash"] == df.loc[idx, "hash"]) & (df["evaluated"] == True)].iloc[0]
+                #print(matched_architecture)
+                #print(df.loc[idx])
                 df.loc[idx, "proxy_utilisation"] = matched_architecture["proxy_utilisation"]
                 df.loc[idx, "proxy_accuracy"] = matched_architecture["proxy_accuracy"]
                 df.loc[idx, "fitness"] = matched_architecture["fitness"]
                 df.loc[idx, "evaluated"] = True
-                print(f"[NAS-Evaluate] Found matching architecture for {df.loc[idx, 'hash']}.")
+                print(f"[NAS-Evaluate] Found matching architecture for {df.loc[idx, 'hash']} (Index: {idx}).")
             else:
                 arch = Architecture(hyper_params, hidden_layers=df.loc[idx, "hidden_layers"], inter_layer_bitwidth=df.loc[idx, "inter_layer_bitwidth"], inter_layer_fanin=df.loc[idx, "inter_layer_fanin"])
                 arch.evaluate()
@@ -312,7 +333,6 @@ def genetic_search():
 
         individual = {
             'gen'  : gen,
-            'hash' : Architecture.compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin),
             'hidden_layers' : hidden_layers,
             'inter_layer_bitwidth' : inter_layer_bitwidth,
             'inter_layer_fanin' : inter_layer_fanin,
@@ -353,7 +373,6 @@ def genetic_search():
             individual["hidden_layers"] = hidden_layers
             individual["inter_layer_bitwidth"] = inter_layer_bitwidth
             individual["inter_layer_fanin"] = inter_layer_fanin
-            individual["hash"] = Architecture.compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin)
 
         return individual
     
@@ -414,21 +433,25 @@ def genetic_search():
                 df.at[i, "hidden_layers"] = params_dict["hidden_layers"]
                 df.at[i, "inter_layer_bitwidth"] = params_dict["inter_layer_bitwidth"]
                 df.at[i, "inter_layer_fanin"] = params_dict["inter_layer_fanin"]
-                df.at[i, "hash"] = Architecture.compute_hash(params_dict["hidden_layers"], params_dict["inter_layer_bitwidth"], params_dict["inter_layer_fanin"])
 
         return df
 
-    def evolvePop(df, hyper_params):
+    def evolvePop(gen_to_evolve, hyper_params):
         
-        new_population = pd.DataFrame(columns=df.columns.tolist())
-        df["fitness"] = pd.to_numeric(df["fitness"], errors='coerce') # Workaround for bug in older pandas version.
+        print(f"\nPopulation presented to evolvePop():\n\n{gen_to_evolve[['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
+
+        new_population = pd.DataFrame(columns=gen_to_evolve.columns.tolist())
+        gen_to_evolve["evaluated"] = False
+        gen_to_evolve["hash"] = None
+        gen_to_evolve["fitness"] = pd.to_numeric(gen_to_evolve["fitness"], errors='coerce') # Workaround for bug in older pandas version.
 
         ### Tournament ###
         for i in range(hyper_params["pop_size"] - hyper_params["elitism"] - hyper_params["randoms"]):
             # Randomly select a number of individuals from the population and add them for mutation.
-            new_population = new_population.append(df.loc[df.sample(hyper_params["tourn_size"])["fitness"].idxmin()])
+            new_population = new_population.append(gen_to_evolve.loc[gen_to_evolve.sample(hyper_params["tourn_size"])["fitness"].idxmin()], ignore_index=True)
+            new_population.reset_index(drop=True, inplace=True)
 
-        print(f"\nTournament Selection:\n\n{new_population}\n")
+        #print(f"\nTournament Selection:\n\n{new_population[['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
         
         ### Mutation ###
         new_population = new_population.apply(mutate, axis=1)
@@ -437,9 +460,9 @@ def genetic_search():
         new_population = crossover(new_population)
 
         ### Elitism & Randoms ###
-        new_population = new_population.append(df.nsmallest(hyper_params["elitism"], "fitness")) # Elitism
+        new_population = new_population.append(gen_to_evolve.nsmallest(hyper_params["elitism"], "fitness"), ignore_index=True) # Elitism
         for i in range(hyper_params["randoms"]):
-            new_population = new_population.append(create_random_individual(hyper_params=hyper_params, gen=df["gen"].max()), ignore_index=True) # Randoms
+            new_population = new_population.append(create_random_individual(hyper_params=hyper_params, gen=gen_to_evolve["gen"].max()), ignore_index=True) # Randoms
 
         new_population["gen"] += 1
         new_population["evaluated"] = False
@@ -467,10 +490,27 @@ def genetic_search():
         for i in range(start_gen + 1, ngen):
             
             evaluate(df) # Ensure all individuals currently in the population have been evaluated.
-            df = df.append(evolvePop(df[df["gen"] == i - 1].copy(), hyper_params=hyper_params), ignore_index=True) # Copy the last generation and evolve a new one.
+
+            print(f"\nPre evolvePop():\n\n{df}\n")
+            prev_gen = df[df["gen"] == i - 1]
+            new_generation = evolvePop(copy.deepcopy(prev_gen), hyper_params=hyper_params) # copy.deepcopy must be used here. It is not equivalent to the pandas .copy method since there is lists inside the dataframe!
+
+            if False:
+                print(f"\n{new_generation[new_generation['gen'] == i][['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
+
+            print(f"\nPost evolvePop:\n\n{df}\n")
+            df = df.append(new_generation, ignore_index=True) # Copy the last generation and evolve a new one.
+            df.reset_index(drop=True, inplace=True)
+            
             evaluate(df)
-            if verbose:
-                print(f"\n{df[df['gen'] == i][['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
+            #print(f"\nPost-eval:\n\n{df}\n")
+            if False:
+                print(f"\n{df[df['gen'] == i][['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
+
+            # Perform a validation check.
+            validate(df.copy())
+
+            
 
             save_checkpoint(df, df_log_path) # Save checkpoint to allow analysis and interrupted execution.
 
@@ -479,9 +519,9 @@ def genetic_search():
                 print(f"\nGeneration: {i}, FitnessMax: {round(current_gen['fitness'].max(), 4)}, FitnessMin: {round(current_gen['fitness'].min(), 4)}, FitnessAvg: {round(current_gen['fitness'].mean(), 4)}\n")
                 print("#############################################################################################\n")
 
-        print("[NAS] Search Complete! Top 5 Architectures:")
+        print("[NAS] Search Complete! Top 10 Architectures:")
         df["fitness"] = pd.to_numeric(df["fitness"])
-        print(df.nsmallest(5, "fitness"))
+        print(df.groupby('hash').first().nsmallest(10, 'fitness'))
 
 
 

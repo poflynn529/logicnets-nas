@@ -15,10 +15,11 @@ hyper_params = {
     "cuda": True,
 }
 
-a = Architecture(hyper_params=hyper_params, hidden_layers=[497, 134, 64, 32], inter_layer_bitwidth=[2, 1, 2, 2, 2, 1, 2], inter_layer_fanin=[6, 7, 6, 7, 3, 5])
+a = Architecture(hyper_params=hyper_params, hidden_layers=[508, 75, 24, 16], inter_layer_bitwidth=[1, 2, 1, 2, 2, 2, 2], inter_layer_fanin=[5, 6, 5, 4, 5, 7])
+label = ""
 
 results = a.final_eval(custom_hyper_params=hyper_params)
 print(results)
 
 with open(log_path, 'a', newline='\n') as file:
-    file.write(f"{a.hidden_layers}, {a.inter_layer_bitwidth}, {a.inter_layer_fanin}, {round(results[0], 3)}, {results[1]}, ''\n")
+    file.write(f"{a.hidden_layers}, {a.inter_layer_bitwidth}, {a.inter_layer_fanin}, {round(results[0], 3)}, {results[1]}, '{label}'\n")
