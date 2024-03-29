@@ -89,6 +89,9 @@ RUN pip install --no-cache-dir torch==1.5.1+cu101 torchvision==0.6.1+cu101 -f ht
 RUN pip install --no-cache-dir git+https://github.com/Xilinx/brevitas.git@67be9b58c1c63d3923cac430ade2552d0db67ba5
 # Install prerequisites for pyverilator
 RUN pip install --no-cache-dir pyverilator
+RUN pip install deap
+RUN pip install pandas==1.0.5
+RUN pip install numpy==1.19.5
 
 # Install LogicNets library - SKIP this step and install during entry-point NOT SKIPPING SINCE ENTRY-SCRIPT CAUSING ISSUES
 USER root

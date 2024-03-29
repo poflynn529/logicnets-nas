@@ -51,7 +51,7 @@ class ArchitectureOld:
         return round(utilisation_loss * self.hyper_params["utilisation_coeff"] + accuracy_loss * self.hyper_params["accuracy_coeff"], 3)
 
     def evaluate(self):
-        self.accuracy = np.mean(train.main(self)) / 100
+        self.accuracy = random.random()# np.mean(train.main(self)) / 100
         #print(f"[DEBUG] Final Validation Accuracy: {self.accuracy}")
         self.utilisation = self.compute_utilisation()
         self.loss = self.compute_loss()
@@ -97,7 +97,8 @@ class Architecture:
         self.hash = hash
 
     # Compute utilisation based on the layer sizes and input and output bitwidths
-    def compute_utilisation(self):
+    @staticmethod
+    def compute_utilisation(hidden_layers, inter_layer_bitwidth, inter_layer_fanin):
 
         # LUT cost of NEQ based on LogicNets paper where X and Y corresponding to the bitwidth of the input
         # and output respectively.
@@ -107,36 +108,37 @@ class Architecture:
         util = 0
 
         # Input Layer
-        util += 593 * lut_cost(self.inter_layer_fanin[0] * self.inter_layer_bitwidth[0], self.inter_layer_bitwidth[1])
+        util += 593 * lut_cost(inter_layer_fanin[0] * inter_layer_bitwidth[0], inter_layer_bitwidth[1])
         
         # Hidden Layers
-        for i, layer in enumerate(self.hidden_layers):
-            util += layer * lut_cost(self.inter_layer_fanin[i + 1]*self.inter_layer_bitwidth[i + 1], self.inter_layer_bitwidth[i + 2])
+        for i, layer in enumerate(hidden_layers):
+            util += layer * lut_cost(inter_layer_fanin[i + 1]*inter_layer_bitwidth[i + 1], inter_layer_bitwidth[i + 2])
 
         # Output Layer
-        util += lut_cost(self.inter_layer_fanin[-1]*self.inter_layer_bitwidth[-2], self.inter_layer_bitwidth[-1])
+        util += lut_cost(inter_layer_fanin[-1]*inter_layer_bitwidth[-2], inter_layer_bitwidth[-1])
 
         return util
 
     # Compute the loss of a particular architecture.
-    def compute_loss(self):
+    @staticmethod
+    def compute_loss(proxy_accuracy, proxy_utilisation, hyper_params):
 
-        utilisation_loss = (self.utilisation / self.hyper_params["unity_utilisation"])
+        utilisation_loss = (proxy_utilisation / hyper_params["unity_utilisation"])
         
-        if self.accuracy > self.hyper_params["target_accuracy"]:
+        if proxy_accuracy > hyper_params["target_accuracy"]:
             accuracy_loss = 0
             #print(f"[DEBUG] Target Accuracy Acheived, AccLoss: {accuracy_loss}")
         else:
-            accuracy_loss = (self.hyper_params["target_accuracy"] - self.accuracy)
+            accuracy_loss = (hyper_params["target_accuracy"] - proxy_accuracy)
             #print(f"[DEBUG] AccLoss: {accuracy_loss}")
 
-        return round(utilisation_loss * self.hyper_params["utilisation_coeff"] + accuracy_loss * self.hyper_params["accuracy_coeff"], 3)
+        return round(utilisation_loss * hyper_params["utilisation_coeff"] + accuracy_loss * hyper_params["accuracy_coeff"], 3)
 
     def evaluate(self):
         self.accuracy = np.mean(train.main(self)) / 100
         #print(f"[DEBUG] Final Validation Accuracy: {self.accuracy}")
-        self.utilisation = self.compute_utilisation()
-        self.loss = self.compute_loss()
+        self.utilisation = Architecture.compute_utilisation(self.hidden_layers, self.inter_layer_bitwidth, self.inter_layer_fanin)
+        self.loss = Architecture.compute_loss(self.accuracy, self.utilisation, self.hyper_params)
         self.hash = Architecture.compute_hash(self.hidden_layers, self.inter_layer_bitwidth, self.inter_layer_fanin)
 
     def final_eval(self, custom_hyper_params):

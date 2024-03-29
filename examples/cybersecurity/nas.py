@@ -5,6 +5,7 @@ import random
 import pickle
 import os
 import copy
+import yaml
 
 import torch
 import numpy as np
@@ -14,51 +15,9 @@ from deap import base, creator, tools, algorithms
 from architecture import Architecture
 
 # Hyper-Parameters
-hyper_params = {
-    # NAS General
-    "mode"                : "evo",                 # NAS algorithm type. Can be either gradient-based ("grad") or evolutionary-based ("evo").
-    "utilisation_coeff"   : 0.04,                  # Weight of the loss function towards resource utilisation.
-    "accuracy_coeff"      : 0.96,                  # Weight of the loss function towards accuracy.
-    "unity_utilisation"   : 757850,                # LUT utilisation considered "nominal" to normalise loss function input. NID-M utilisation is used.
-    "target_accuracy"     : 0.92,                  # Target accuracy for loss function. After this accuracy is reached, additional accuracy improvements do not reduce the loss.
-
-    # Gradient NAS Specific
-    "grad_clear_logs"     : False,                 # Clear the log files.
-    "grad_log_file_path"  : "nas_runs/grad_0.csv", # NAS Log File Path
-    "grad_max_iterations" : 100,                   # Maximum amount of architecture explorations per execution of this script
-
-    # Evolutionary NAS Specific
-    "hidden_layers"       : 4,
-    "pop_size"            : 10,
-    "max_generations"     : 40,
-    "crossover_prob"      : 0.5,
-    "gene_crossover_prob" : 0.2,
-    "mutation_prob"       : 0.4,
-    "gene_mutation_prob"  : 0.3,
-    "tourn_size"          : 2,
-    "max_layer_size"      : 593,
-    "min_layer_size"      : 5,
-    "max_bitwidth"        : 2,
-    "min_bitwidth"        : 1,
-    "max_fanin"           : 7,
-    "min_fanin"           : 3,
-    "elitism"             : 1,
-    "randoms"             : 1,   
-    "evo_log_file_path"   : "evo_logs/evo_0.txt",
-    "evo_pickle_path"     : "nas_pickle/test_0.98_util_0.02_hl_4_10_40.pkl",
-    "evo_seed_path"       : "nas_pickle/seed0.pkl",
-
-    # Training
-    "weight_decay": 0.0,
-    "batch_size": 1024,
-    "epochs": 1,
-    "learning_rate": 1e-1,
-    "seed": None,
-    "checkpoint": None,
-    "log_dir": "training-logs",
-    "dataset_file": "unsw_nb15_binarized.npz",
-    "cuda": True,
-}
+with open('hyper_params.yaml', 'r') as file:
+    # Use safe_load() to load the file's contents into a dictionary
+    hyper_params = yaml.safe_load(file)
 
 # GPU Config
 print(f"[NAS] Use CUDA Parameter: {hyper_params['cuda']}")
@@ -264,6 +223,25 @@ def genetic_search():
             file.write(f"\n###### Hall of Fame ######\n\n")
             file.write(f"{hof}\n\n")
 
+    def custom_deepcopy(pd_obj, obj_columns):
+        # The list objects inside the dataframes/series will not be correctly deepcopied causing dataframe/series corruption.
+        # This function fixes that by manually deepcopying the python objects stored inside the dataframe.
+        pd_obj_copy = copy.deepcopy(pd_obj)
+
+        if type(pd_obj) == type(pd.DataFrame(dtype=object)):
+            for obj_name in obj_columns:
+                for idx in pd_obj_copy.index.tolist():
+                    pd_obj_copy.at[idx, obj_name] = copy.deepcopy(pd_obj.loc[idx, obj_name])
+
+        elif type(pd_obj) == type(pd.Series(dtype=object)):
+            for idx in obj_columns:
+                    pd_obj_copy.at[idx] = copy.deepcopy(pd_obj.loc[idx])
+
+        else:
+            raise(TypeError(f"custom_deepcopy() does not support type: {type(pd_obj)}. Object len: {len(pd_obj)}. Supported types: {type(pd.DataFrame())}, {type(pd.Series())}."))
+        
+        return pd_obj_copy
+
     def validate(df):
         # Ensure architectures with the same hash have the same parameters.
         groups = df.drop("gen", axis=1).groupby("hash")
@@ -345,9 +323,9 @@ def genetic_search():
     def mutate(individual):
 
         if random.random() <= hyper_params["mutation_prob"]:
-            hidden_layers = individual["hidden_layers"]
-            inter_layer_bitwidth = individual["inter_layer_bitwidth"]
-            inter_layer_fanin = individual["inter_layer_fanin"]
+            hidden_layers = copy.deepcopy(individual["hidden_layers"])
+            inter_layer_bitwidth = copy.deepcopy(individual["inter_layer_bitwidth"])
+            inter_layer_fanin = copy.deepcopy(individual["inter_layer_fanin"])
 
             ### Layer Size Mutation ###
             if random.random() <= hyper_params["gene_mutation_prob"]:
@@ -356,6 +334,12 @@ def genetic_search():
             for i in range(len(hidden_layers) - 1):
                 if random.random() <= hyper_params["gene_mutation_prob"]:
                     hidden_layers[i + 1] = random.randint(hyper_params["min_layer_size"], hidden_layers[i])
+
+            # Descending Layer check.
+            for i in range(1, hyper_params["hidden_layers"]):
+                    if hidden_layers[i] > hidden_layers[i - 1]:
+                        hidden_layers[i] = random.randint(hyper_params["min_layer_size"], hidden_layers[i - 1])    
+                
             ### End Layer Size Mutation ###
                     
             ### Inter-Layer Bitwidth Mutation ###
@@ -379,10 +363,10 @@ def genetic_search():
     def serialise_params(pd_obj):
 
         if type(pd_obj) == type(pd.DataFrame(dtype=object)):
-            serial_list = pd_obj["hidden_layers"].iloc[0] + pd_obj["inter_layer_bitwidth"].iloc[0] + pd_obj["inter_layer_fanin"].iloc[0]
+            serial_list = copy.deepcopy(pd_obj["hidden_layers"].iloc[0] + pd_obj["inter_layer_bitwidth"].iloc[0] + pd_obj["inter_layer_fanin"].iloc[0])
             #print(f"[DEBUG] serialise_params() returning: {serial_list} from DataFrame")
         elif type(pd_obj) == type(pd.Series(dtype=object)):
-            serial_list = pd_obj["hidden_layers"] + pd_obj["inter_layer_bitwidth"] + pd_obj["inter_layer_fanin"]
+            serial_list = copy.deepcopy(pd_obj["hidden_layers"] + pd_obj["inter_layer_bitwidth"] + pd_obj["inter_layer_fanin"])
             #print(f"[DEBUG] serialise_params() returning: {serial_list} from Series")
         else:
             raise(TypeError(f"serialise_params() does not support type: {type(pd_obj)}. Object len: {len(pd_obj)}. Supported types: {type(pd.DataFrame())}, {type(pd.Series())}."))
@@ -400,14 +384,14 @@ def genetic_search():
         return params_dict
     
     # Cross individuals while maintaining descending layer size.
-    def crossover(df):
+    def crossover(cross_df):
 
-        df = df.reset_index(drop=True) # Index must be reset, otherwise duplicate individuals will be lumped together by the for loop.
+        cross_df = cross_df.reset_index(drop=True) # Index must be reset, otherwise duplicate individuals will be lumped together by the for loop.
         #print(df)
-        for i in df.index.tolist():
+        for i in cross_df.index.tolist():
             if random.random() <= hyper_params["crossover_prob"]:
-                indv1 = serialise_params(df.loc[i])
-                indv2 = serialise_params(df.sample(1))
+                indv1 = serialise_params(cross_df.loc[i])
+                indv2 = serialise_params(cross_df.sample(1))
 
                 # print(f"[DEBUG] indv1: {indv1}")
                 # print(f"[DEBUG] indv2: {indv2}")
@@ -430,15 +414,13 @@ def genetic_search():
 
                 params_dict = deserialise_params(indv1)
 
-                df.at[i, "hidden_layers"] = params_dict["hidden_layers"]
-                df.at[i, "inter_layer_bitwidth"] = params_dict["inter_layer_bitwidth"]
-                df.at[i, "inter_layer_fanin"] = params_dict["inter_layer_fanin"]
+                cross_df.at[i, "hidden_layers"] = params_dict["hidden_layers"]
+                cross_df.at[i, "inter_layer_bitwidth"] = params_dict["inter_layer_bitwidth"]
+                cross_df.at[i, "inter_layer_fanin"] = params_dict["inter_layer_fanin"]
 
-        return df
+        return cross_df
 
     def evolvePop(gen_to_evolve, hyper_params):
-        
-        print(f"\nPopulation presented to evolvePop():\n\n{gen_to_evolve[['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
 
         new_population = pd.DataFrame(columns=gen_to_evolve.columns.tolist())
         gen_to_evolve["evaluated"] = False
@@ -448,19 +430,20 @@ def genetic_search():
         ### Tournament ###
         for i in range(hyper_params["pop_size"] - hyper_params["elitism"] - hyper_params["randoms"]):
             # Randomly select a number of individuals from the population and add them for mutation.
-            new_population = new_population.append(gen_to_evolve.loc[gen_to_evolve.sample(hyper_params["tourn_size"])["fitness"].idxmin()], ignore_index=True)
+            new_population = new_population.append(custom_deepcopy(gen_to_evolve.loc[gen_to_evolve.sample(hyper_params["tourn_size"])["fitness"].idxmin()], ["hidden_layers", "inter_layer_bitwidth", "inter_layer_fanin"]), ignore_index=True)
             new_population.reset_index(drop=True, inplace=True)
 
         #print(f"\nTournament Selection:\n\n{new_population[['gen', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
         
         ### Mutation ###
-        new_population = new_population.apply(mutate, axis=1)
+        for idx in new_population.index.tolist():
+            new_population.loc[idx] = mutate(custom_deepcopy(new_population.loc[idx], ["hidden_layers", "inter_layer_bitwidth", "inter_layer_fanin"]))
 
         ### Crossover ###
         new_population = crossover(new_population)
 
         ### Elitism & Randoms ###
-        new_population = new_population.append(gen_to_evolve.nsmallest(hyper_params["elitism"], "fitness"), ignore_index=True) # Elitism
+        new_population = new_population.append(custom_deepcopy(gen_to_evolve.nsmallest(hyper_params["elitism"], "fitness"), ["hidden_layers", "inter_layer_bitwidth", "inter_layer_fanin"]), ignore_index=True) # Elitism
         for i in range(hyper_params["randoms"]):
             new_population = new_population.append(create_random_individual(hyper_params=hyper_params, gen=gen_to_evolve["gen"].max()), ignore_index=True) # Randoms
 
@@ -491,26 +474,19 @@ def genetic_search():
             
             evaluate(df) # Ensure all individuals currently in the population have been evaluated.
 
-            print(f"\nPre evolvePop():\n\n{df}\n")
             prev_gen = df[df["gen"] == i - 1]
-            new_generation = evolvePop(copy.deepcopy(prev_gen), hyper_params=hyper_params) # copy.deepcopy must be used here. It is not equivalent to the pandas .copy method since there is lists inside the dataframe!
+            new_generation = evolvePop(custom_deepcopy(prev_gen, ["hidden_layers", "inter_layer_bitwidth", "inter_layer_fanin"]), hyper_params=hyper_params) # custom_deepcopy must be used here. It is not equivalent to the pandas .copy method or copy.deepcopy!
 
-            if False:
-                print(f"\n{new_generation[new_generation['gen'] == i][['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
-
-            print(f"\nPost evolvePop:\n\n{df}\n")
             df = df.append(new_generation, ignore_index=True) # Copy the last generation and evolve a new one.
             df.reset_index(drop=True, inplace=True)
             
             evaluate(df)
-            #print(f"\nPost-eval:\n\n{df}\n")
-            if False:
-                print(f"\n{df[df['gen'] == i][['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
+
+            if verbose:
+                print(f"\nNew Population:\n\n{df[df['gen'] == i][['gen', 'hash', 'hidden_layers', 'inter_layer_bitwidth', 'inter_layer_fanin', 'proxy_utilisation', 'proxy_accuracy', 'fitness']]}\n")
 
             # Perform a validation check.
             validate(df.copy())
-
-            
 
             save_checkpoint(df, df_log_path) # Save checkpoint to allow analysis and interrupted execution.
 
@@ -523,60 +499,22 @@ def genetic_search():
         df["fitness"] = pd.to_numeric(df["fitness"])
         print(df.groupby('hash').first().nsmallest(10, 'fitness'))
 
-
-
-    # Main evolutionary function
-    def ga_loop(toolbox, stats, hof, ngen=100, cp_filename=hyper_params["evo_pickle_path"]):
-
-        # Attempt to load from checkpoint
-        if os.path.isfile(cp_filename):
-            data = load_checkpoint(cp_filename)
-            population = data["population"]
-            start_gen = data["generation"] + 1  # Continue from the next generation
-            hof = data["hof"]
-            print(f"Resuming from generation {start_gen}")
-        else:
-            # Start a new evolutionary process
-            population = toolbox.population(n=hyper_params["pop_size"])
-            start_gen = 0
-
-        for gen in range(start_gen, ngen):
-            # The for loop now controls the generation count, so ngen can be set to 1.
-            population, log = algorithms.eaSimple(population, toolbox, cxpb=hyper_params["crossover_prob"], mutpb=hyper_params["mutation_prob"], ngen=1, stats=stats, halloffame=hof, verbose=True)
-
-            # Save a checkpoint for each generation.
-            save_checkpoint(population, gen, hof, cp_filename)
-            save_log(gen, population, log)
-
-            print(f"Checkpoint & log saved for generation {gen}")
-        
-        print ("[NAS] Evolutionary search complete! Writing 'Hall of Fame' to log...")
-        save_hof(hof)
-
-    # Define the fitness criterion - weight is negetive since we want to minimise the loss function.
-    creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMin, proxy_accuracy=None, utilisation=None, num_hidden_layers=None) # The proxy_accuracy and utilisation attributes just allow easier logging. They are set in the evaluate() function.
-
-    toolbox = base.Toolbox()
-
-    # This line creates an individual and uses the "attr_int" function to add 4 genes.
-    toolbox.register("individual", create_random_individual, num_layers=4) 
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=hyper_params["pop_size"]) # Create a random population
-    
-    toolbox.register("evaluate", evaluate)
-    toolbox.register("mate", crossover)  # Crossover
-    toolbox.register("mutate", mutate, indpb=0.3)  # Mutation
-    toolbox.register("select", tools.selTournament, tournsize=hyper_params["tourn_size"])
-
-    ### Main Evolutionary Code ###
-    hof = tools.HallOfFame(3)  # Hall of Fame to store the best individual
-
-    stats = tools.Statistics(lambda ind: ind.fitness.values)
-    stats.register("avg", np.mean)
-    stats.register("min", np.min)
-    stats.register("max", np.max)
-
+    # Entry point
     eaCustom(hyper_params=hyper_params, df_log_path=hyper_params["evo_pickle_path"], ngen=40, verbose=True)
+        
+    ### Tests ###
+    def test_mutate():
+        test_series = pd.Series(create_random_individual(gen=0, hyper_params=hyper_params))
+        for i in range(1000):
+            mutate(test_series)
+            for j in range(1, hyper_params["hidden_layers"]):
+                if test_series["hidden_layers"][j - 1] < test_series["hidden_layers"][j]:
+                    print(f"[TEST] Mutate Failed i = {i}, hidden_layers = {test_series['hidden_layers']}!")
+
+    def test_crossover():
+        return
+    
+    #test_mutate()
 
 
 # Main function

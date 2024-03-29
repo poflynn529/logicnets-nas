@@ -24,9 +24,9 @@ DOCKER_TAG=$DOCKER_UNAME/logicnets:$(date +%Y%m%d%H%M)
 LOGICNETS_PATH=$(readlink -f $(dirname ${0})/../)
 LOGICNETS_MOUNT_POINT=/workspace/logicnets
 
-echo "Starting Container Build..."
+echo "Starting Image Build..."
 
-docker build --no-cache -f docker/Dockerfile.cpu -t ${DOCKER_TAG} \
+docker build -f docker/Dockerfile.cpu -t ${DOCKER_TAG} \
     --build-arg GID=$DOCKER_GID \
     --build-arg GNAME=$DOCKER_GNAME \
     --build-arg UNAME=$DOCKER_UNAME \
