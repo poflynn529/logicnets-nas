@@ -38,6 +38,8 @@ To then generate verilog from this trained model, run the following:
 python neq2lut.py --arch <nid-s|nid-m|nid-l> --checkpoint ./<nid_s|nid_m|nid_l>/best_accuracy.pth --log-dir ./<nid_s|nid_m|nid_l>/verilog/ --add-registers
 ```
 
+python neq2lut.py --arch nid-m --checkpoint ./nid_m/best_accuracy.pth --log-dir ./nid_m/verilog/ --add-registers
+
 ## Results
 
 Your results may vary slightly, depending on your system configuration.

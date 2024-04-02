@@ -5,11 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Python Debugger: neq2lut.py",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal"
+            "program": "neq2lut.py",
+            "args": ["--arch", "nid-m", "--checkpoint", "./nid_m/best_accuracy.pth", "--log-dir", "./nid_m/verilog/", "--add-registers"],
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

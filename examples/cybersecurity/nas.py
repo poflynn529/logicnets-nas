@@ -460,7 +460,8 @@ def genetic_search():
         if pd.isna(df["gen"].max()):
             start_gen = 0
             # Seed individuals
-            df = load_seed(hyper_params["evo_seed_path"])
+            if hyper_params["evo_seed_path"] != "None":
+                df = load_seed(hyper_params["evo_seed_path"])
 
             # Create (n - seed) random individuals
             for i in range(hyper_params["pop_size"] - len(df)):

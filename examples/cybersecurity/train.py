@@ -248,7 +248,7 @@ def train(model, datasets, train_cfg, options):
             val_accuracy_log.append(val_accuracy)
 
             # Update progress bar with custom postfix information for each epoch
-            pbar.set_postfix(loss=f'{accLoss.detach().cpu().numpy():.3e}', val_acc=f'{val_accuracy:.3f}')
+            pbar.set_postfix(loss=f'{accLoss.detach().cpu().numpy():.3e}', avg_val_acc=f'{np.mean(val_accuracy_log):.3f}', max_val_acc=f'{np.max(val_accuracy_log):.3f}')
             # Update progress bar to next epoch
             pbar.update(1)
 
@@ -258,9 +258,13 @@ def test(model, dataset_loader, cuda, thresh=0.75):
     model.eval()
     correct = 0
     accLoss = 0.0
+    print(len(dataset_loader))
     for batch_idx, (data, target) in enumerate(dataset_loader):
         if cuda:
-            data, target = data.cuda(), target.cuda()
+            print("[Test] CUDA Available, Device Name:", torch.cuda.get_device_name(0))
+            device = torch.device("cuda")
+            data, target = data.to(device), target.to(device)
+            model.to(device)
         output = model(data)
         pred = (torch.sigmoid(output.detach()) > thresh) * 1
         curCorrect = pred.eq(target.unsqueeze(1)).long().sum()

@@ -142,7 +142,7 @@ class Architecture:
         self.hash = Architecture.compute_hash(self.hidden_layers, self.inter_layer_bitwidth, self.inter_layer_fanin)
 
     def final_eval(self, custom_hyper_params):
-        return np.max(train.main(self, custom_hyper_params)) / 100, self.compute_utilisation()
+        return np.max(train.main(self, custom_hyper_params)) / 100, self.compute_utilisation(self.hidden_layers, self.inter_layer_bitwidth, self.inter_layer_fanin)
         
     @staticmethod
     def compute_hash(hidden_layers, inter_layer_bitwidth, inter_layer_fanin):

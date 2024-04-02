@@ -1,11 +1,12 @@
 {
     "name": "LogicNets-NAS",
     "extensions": [
-        "ms-python.python",
+        "ms-python.python"
     ],
     "runArgs": [
         "--gpus", "all",
-        "-v", "D:/source/logicnets-nas/examples/cybersecurity:/workspace/logicnets"
+        "-v", "D:/source/logicnets-nas/examples/cybersecurity:/workspace/logicnets",
+        "-m", "20g"
     ],
     "image" : "sha256:1568f8c7ec0a999c53e4a6c530397b1314fea81a542189f763c11979c1f3ffe9",
     "workspaceFolder": "/workspace/logicnets",

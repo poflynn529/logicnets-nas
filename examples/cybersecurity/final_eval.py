@@ -15,7 +15,9 @@ hyper_params = {
     "cuda": True,
 }
 
-a = Architecture(hyper_params=hyper_params, hidden_layers=[508, 75, 24, 16], inter_layer_bitwidth=[1, 2, 1, 2, 2, 2, 2], inter_layer_fanin=[5, 6, 5, 4, 5, 7])
+# [425, 191, 128, 128]	[1, 1, 1, 2, 1, 1, 2]	[7, 7, 6, 4, 3, 6]
+
+a = Architecture(hyper_params=hyper_params, hidden_layers=[425, 191, 128, 128], inter_layer_bitwidth=[1, 1, 1, 2, 1, 1, 2], inter_layer_fanin=[7, 7, 6, 4, 3, 6])
 label = ""
 
 results = a.final_eval(custom_hyper_params=hyper_params)

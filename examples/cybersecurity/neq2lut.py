@@ -29,7 +29,7 @@ from dataset import get_preqnt_dataset
 from models import UnswNb15NeqModel, UnswNb15LutModel
 
 other_options = {
-    "cuda": None,
+    "cuda": True,
     "log_dir": None,
     "checkpoint": None,
     "generate_bench": False,
@@ -37,6 +37,11 @@ other_options = {
     "simulate_pre_synthesis_verilog": False,
     "simulate_post_synthesis_verilog": False,
 }
+
+def printlog(text, filename="neq2lut_log.txt"):
+    print(text)
+    with open(filename, 'a', newline='\n') as file:
+        file.write(f"{text}\n")
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Synthesize convert a PyTorch trained model into verilog")
@@ -102,10 +107,11 @@ if __name__ == "__main__":
             continue
         options_cfg[k] = config[k]
 
+
     # Fetch the test set
     dataset = {}
     dataset[args.dataset_split] = get_preqnt_dataset(dataset_cfg['dataset_file'], split=args.dataset_split)
-    test_loader = DataLoader(dataset[args.dataset_split], batch_size=config['batch_size'], shuffle=False)
+    test_loader = DataLoader(dataset[args.dataset_split], batch_size=config['batch_size'], shuffle=False, )
 
     # Instantiate the PyTorch model
     x, y = dataset[args.dataset_split][0]
@@ -113,38 +119,49 @@ if __name__ == "__main__":
     model_cfg['output_length'] = 1
     model = UnswNb15NeqModel(model_cfg)
 
+    # Push model to cuda if required:
+    if other_options["cuda"]:
+        model.cuda()
+
     # Load the model weights
     checkpoint = torch.load(options_cfg['checkpoint'], map_location='cpu')
     model.load_state_dict(checkpoint['model_dict'])
 
     # Test the PyTorch model
-    print("Running inference on baseline model...")
+    printlog("Running inference on baseline model...")
     model.eval()
-    baseline_accuracy = test(model, test_loader, cuda=False)
-    print("Baseline accuracy: %f" % (baseline_accuracy))
+    baseline_accuracy = test(model, test_loader, cuda=other_options["cuda"])
+    printlog(f"Baseline accuracy: {baseline_accuracy}")
 
     # Instantiate LUT-based model
     lut_model = UnswNb15LutModel(model_cfg)
     lut_model.load_state_dict(checkpoint['model_dict'])
 
     # Generate the truth tables in the LUT module
-    print("Converting to NEQs to LUTs...")
+    printlog("Converting to NEQs to LUTs...")
     generate_truth_tables(lut_model, verbose=True)
+    printlog("Completed truth table generation.")
 
     # Test the LUT-based model
-    print("Running inference on LUT-based model...")
+    printlog("Running inference on LUT-based model...")
     lut_inference(lut_model)
+    printlog("Inference complete")
     lut_model.eval()
-    lut_accuracy = test(lut_model, test_loader, cuda=False)
-    print("LUT-Based Model accuracy: %f" % (lut_accuracy))
+    printlog("lut eval complete")
+
+    torch.save(lut_model.state_dict(), options_cfg["log_dir"] + "/lut_based_model_no_acc.pth")
+    printlog(f"Saved lut_model to {options_cfg['log_dir']}/lut_based_model_no_acc.pth")
+
+    ### Evaluation & Verilog Generation ###
+
+    lut_accuracy = test(lut_model, test_loader, other_options["cuda"])
+    printlog(f"LUT-Based Model accuracy: {lut_accuracy}")
     modelSave = {   'model_dict': lut_model.state_dict(),
                     'test_accuracy': lut_accuracy}
 
-    torch.save(modelSave, options_cfg["log_dir"] + "/lut_based_model.pth")
-
-    print("Generating verilog in %s..." % (options_cfg["log_dir"]))
+    printlog(f"Generating verilog in {options_cfg['log_dir']}")
     module_list_to_verilog_module(lut_model.module_list, "logicnet", options_cfg["log_dir"], generate_bench=options_cfg["generate_bench"], add_registers=options_cfg["add_registers"])
-    print("Top level entity stored at: %s/logicnet.v ..." % (options_cfg["log_dir"]))
+    printlog(f"Top level entity stored at: {options_cfg['log_dir']}/logicnet.v ...")
 
     if args.dump_io:
         io_filename = options_cfg["log_dir"] + f"io_{args.dataset_split}.txt"
@@ -157,16 +174,16 @@ if __name__ == "__main__":
     if args.simulate_pre_synthesis_verilog:
         print("Running inference simulation of Verilog-based model...")
         lut_model.verilog_inference(options_cfg["log_dir"], "logicnet.v", logfile=io_filename, add_registers=options_cfg["add_registers"])
-        verilog_accuracy = test(lut_model, test_loader, cuda=False)
+        verilog_accuracy = test(lut_model, test_loader, cuda=other_options["cuda"])
         print("Verilog-Based Model accuracy: %f" % (verilog_accuracy))
 
-    print("Running out-of-context synthesis")
+    printlog("Running out-of-context synthesis")
     ret = synthesize_and_get_resource_counts(options_cfg["log_dir"], "logicnet", fpga_part="xcu280-fsvh2892-2L-e", clk_period_ns=args.clock_period, post_synthesis = 1)
 
     if args.simulate_post_synthesis_verilog:
         print("Running post-synthesis inference simulation of Verilog-based model...")
         proc_postsynth_file(options_cfg["log_dir"])
         lut_model.verilog_inference(options_cfg["log_dir"]+"/post_synth", "logicnet_post_synth.v", io_filename, add_registers=options_cfg["add_registers"])
-        post_synth_accuracy = test(lut_model, test_loader, cuda=False)
+        post_synth_accuracy = test(lut_model, test_loader, cuda=other_options["cuda"])
         print("Post-synthesis Verilog-Based Model accuracy: %f" % (post_synth_accuracy))
     
