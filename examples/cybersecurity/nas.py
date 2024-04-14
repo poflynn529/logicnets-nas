@@ -123,7 +123,7 @@ def gradient_search():
     # We need at least two datapoints to perform the gradient computation:
     if row_count == 0:
 
-        arch = Architecture(hyper_params, nid_m_arch) # Create an instance of the NID-M architecture outlined in the LogicNets paper.
+        arch = Architecture(hyper_params) # Create an instance of the NID-M architecture outlined in the LogicNets paper.
         arch.evaluate()
         print(arch.get_csv_data())
         append_to_csv(hyper_params["log_file_path"], arch.get_csv_data())
@@ -501,7 +501,7 @@ def genetic_search():
         print(df.groupby('hash').first().nsmallest(10, 'fitness'))
 
     # Entry point
-    eaCustom(hyper_params=hyper_params, df_log_path=hyper_params["evo_pickle_path"], ngen=40, verbose=True)
+    eaCustom(hyper_params=hyper_params, df_log_path=hyper_params["evo_pickle_path"], ngen=hyper_params["max_generations"], verbose=True)
         
     ### Tests ###
     def test_mutate():

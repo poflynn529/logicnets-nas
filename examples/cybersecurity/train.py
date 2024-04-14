@@ -258,10 +258,10 @@ def test(model, dataset_loader, cuda, thresh=0.75):
     model.eval()
     correct = 0
     accLoss = 0.0
-    print(len(dataset_loader))
+    #print(len(dataset_loader))
     for batch_idx, (data, target) in enumerate(dataset_loader):
         if cuda:
-            print("[Test] CUDA Available, Device Name:", torch.cuda.get_device_name(0))
+            #print("[Test] CUDA Available, Device Name:", torch.cuda.get_device_name(0))
             device = torch.device("cuda")
             data, target = data.to(device), target.to(device)
             model.to(device)

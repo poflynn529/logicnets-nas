@@ -15,9 +15,11 @@ hyper_params = {
     "cuda": True,
 }
 
-# [425, 191, 128, 128]	[1, 1, 1, 2, 1, 1, 2]	[7, 7, 6, 4, 3, 6]
+# [475, 100, 76, 19, 9, 7]	[1, 1, 2, 3, 2, 3, 3, 1, 3]	[6, 4, 7, 6, 6, 4, 6, 6] 0.901
+# [475, 100, 92, 19, 9, 5]	[1, 1, 2, 2, 1, 3, 3, 3, 3]	[6, 4, 7, 6, 6, 4, 6, 6] 0.887
 
-a = Architecture(hyper_params=hyper_params, hidden_layers=[425, 191, 128, 128], inter_layer_bitwidth=[1, 1, 1, 2, 1, 1, 2], inter_layer_fanin=[7, 7, 6, 4, 3, 6])
+
+a = Architecture(hyper_params=hyper_params, hidden_layers=[475, 100, 92, 19, 9, 5], inter_layer_bitwidth=[1, 1, 2, 2, 1, 3, 3, 3, 3], inter_layer_fanin=[6, 4, 7, 6, 6, 4, 6, 6])
 label = ""
 
 results = a.final_eval(custom_hyper_params=hyper_params)

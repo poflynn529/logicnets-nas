@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "neq2lut.py",
-            "args": ["--arch", "nid-m", "--checkpoint", "./nid_m/best_accuracy.pth", "--log-dir", "./nid_m/verilog/", "--add-registers"],
+            // "args": ["--arch", "nid-s", "--checkpoint", "./nid_s/best_accuracy.pth", "--log-dir", "./nid_s/verilog/", "--add-registers"],
             "console": "integratedTerminal",
             "justMyCode": false
         }
